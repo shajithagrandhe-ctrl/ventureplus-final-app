@@ -1,0 +1,1565 @@
+diff --git a/server/src/app.ts b/server/src/app.ts
+index 6ffc822..e805f7a 100644
+--- a/server/src/app.ts
++++ b/server/src/app.ts
+@@ -104,6 +104,9 @@ export const createApp = () => {
+     const asset = await prisma.ventureAsset.findUnique({ where: { id: req.params.id } });
+     if (!asset) { res.sendStatus(404); return; }
+     res.setHeader("Content-Type", asset.contentType);
++    if (asset.contentType === "image/svg+xml") {
++      res.setHeader("Content-Security-Policy", "sandbox; default-src 'none'; style-src 'unsafe-inline'");
++    }
+     res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+     res.send(Buffer.from(asset.data));
+   }));
+diff --git a/server/src/controllers/customers.controller.ts b/server/src/controllers/customers.controller.ts
+index 57bbb9d..b48e8cc 100644
+--- a/server/src/controllers/customers.controller.ts
++++ b/server/src/controllers/customers.controller.ts
+@@ -53,7 +53,7 @@ export const updateCustomerRecordHandler = async (req: AuthenticatedRequest, res
+ };
+ 
+ export const deleteCustomerRecordHandler = async (req: AuthenticatedRequest, res: Response) => {
+-  const record = await deleteCustomerRecord(req.params.id);
++  const record = await deleteCustomerRecord(req.params.id, { userId: req.user?.sub, role: req.user?.role, email: req.user?.email });
+   await publishEvent("customer.deleted", { recordId: record.id });
+ 
+   return res.json({
+diff --git a/server/src/controllers/employeeAccess.controller.ts b/server/src/controllers/employeeAccess.controller.ts
+index 355fd48..aa0d1cb 100644
+--- a/server/src/controllers/employeeAccess.controller.ts
++++ b/server/src/controllers/employeeAccess.controller.ts
+@@ -4,6 +4,13 @@ import { prisma } from "../config/prisma.js";
+ import { hashPassword } from "../utils/password.js";
+ import { requestOtp, verifyOtp } from "../services/otp.service.js";
+ import { getEmployeeAssignment, getEmployeeAssignmentMap, upsertEmployeeAssignment } from "../services/employeeAssignment.service.js";
++import { HttpError } from "../utils/httpError.js";
++
++const requireEmployeeTarget = async (id: string) => {
++  const target = await prisma.user.findFirst({ where: { id, role: "EMPLOYEE" }, select: { id: true, email: true } });
++  if (!target) throw new HttpError(404, "Employee not found");
++  return target;
++};
+ 
+ const employeeAccountSelect = {
+   id: true,
+@@ -123,7 +130,11 @@ export const createEmployeeAccount = async (req: Request, res: Response) => {
+ 
+ export const updateEmployeeAccount = async (req: Request, res: Response) => {
+   const { id } = req.params as any;
++  const target = await requireEmployeeTarget(id);
+   const body = req.body as any;
++  if (body.email !== undefined && body.email.trim().toLowerCase() !== target.email.trim().toLowerCase()) {
++    throw new HttpError(400, "Employee email is fixed after account creation.");
++  }
+ 
+   const updates: any = {};
+   if (body.displayName !== undefined) updates.displayName = body.displayName;
+@@ -155,7 +166,7 @@ export const updateEmployeeAccount = async (req: Request, res: Response) => {
+   if (body.status !== undefined) profileUpdate.status = body.status;
+ 
+   const user = await prisma.user.update({
+-    where: { id },
++    where: { id, role: "EMPLOYEE" },
+     data: {
+       ...updates,
+       employeeProfile: {
+@@ -210,6 +221,7 @@ export const updateEmployeeAccount = async (req: Request, res: Response) => {
+ 
+ export const setEmployeeStatus = async (req: Request, res: Response) => {
+   const { id } = req.params as any;
++  await requireEmployeeTarget(id);
+   const { status } = req.body as any;
+ 
+   const profile = await prisma.employeeProfile.upsert({
+diff --git a/server/src/controllers/favorites.controller.ts b/server/src/controllers/favorites.controller.ts
+index 5079f5c..2f7de87 100644
+--- a/server/src/controllers/favorites.controller.ts
++++ b/server/src/controllers/favorites.controller.ts
+@@ -5,7 +5,7 @@ import { publishEvent } from "../realtime/events.js";
+ 
+ export const getFavorites = async (req: AuthenticatedRequest, res: Response) => {
+   const userId = req.user?.sub as string;
+-  const favorites = await listFavorites(userId);
++  const favorites = await listFavorites(userId, { userId, role: req.user?.role, email: req.user?.email });
+ 
+   return res.json({
+     success: true,
+@@ -17,7 +17,7 @@ export const getFavorites = async (req: AuthenticatedRequest, res: Response) =>
+ export const createFavorite = async (req: AuthenticatedRequest, res: Response) => {
+   const userId = req.user?.sub as string;
+   const { plotId } = req.body;
+-  const favorite = await addFavorite(userId, plotId);
++  const favorite = await addFavorite(userId, plotId, { userId, role: req.user?.role, email: req.user?.email });
+   await publishEvent("favorite.created", { favorite, userId, plotId });
+ 
+   return res.status(201).json({
+diff --git a/server/src/controllers/leads.controller.ts b/server/src/controllers/leads.controller.ts
+index cefd3ae..43dd06c 100644
+--- a/server/src/controllers/leads.controller.ts
++++ b/server/src/controllers/leads.controller.ts
+@@ -6,7 +6,7 @@ import type { AuthenticatedRequest } from "../middleware/auth.js";
+ export const getLeadsByPlot = async (req: AuthenticatedRequest, res: Response) => {
+   const result = await listLeads({
+     plotId: req.params.plotId,
+-    requester: { role: req.user?.role, email: req.user?.email }
++    requester: { userId: req.user?.sub, role: req.user?.role, email: req.user?.email }
+   });
+ 
+   return res.json({
+@@ -23,7 +23,7 @@ export const getLeads = async (req: AuthenticatedRequest, res: Response) => {
+   const result = await listLeads({
+     page,
+     pageSize,
+-    requester: { role: req.user?.role, email: req.user?.email }
++    requester: { userId: req.user?.sub, role: req.user?.role, email: req.user?.email }
+   });
+ 
+   return res.json({
+@@ -38,7 +38,7 @@ export const createLeadHandler = async (req: AuthenticatedRequest, res: Response
+   const body = { ...(req.body || {}) };
+   if (!body.agentId && req.user?.sub) body.agentId = req.user.sub;
+ 
+-  const lead = await createLead(body);
++  const lead = await createLead(body, { userId: req.user?.sub, role: req.user?.role, email: req.user?.email });
+   await publishEvent("lead.created", { lead });
+   await publishEvent("plot.updated", { plotId: lead.plotId });
+ 
+@@ -50,7 +50,7 @@ export const createLeadHandler = async (req: AuthenticatedRequest, res: Response
+ };
+ 
+ export const updateLeadHandler = async (req: AuthenticatedRequest, res: Response) => {
+-  const lead = await updateLead(req.params.leadId, req.body);
++  const lead = await updateLead(req.params.leadId, req.body, { userId: req.user?.sub, role: req.user?.role, email: req.user?.email });
+   await publishEvent("lead.updated", { lead });
+   await publishEvent("plot.updated", { plotId: lead.plotId });
+ 
+@@ -62,7 +62,7 @@ export const updateLeadHandler = async (req: AuthenticatedRequest, res: Response
+ };
+ 
+ export const deleteLeadHandler = async (req: AuthenticatedRequest, res: Response) => {
+-  const lead = await deleteLead(req.params.leadId);
++  const lead = await deleteLead(req.params.leadId, { userId: req.user?.sub, role: req.user?.role, email: req.user?.email });
+   await publishEvent("lead.deleted", { leadId: lead.id });
+   await publishEvent("plot.updated", { plotId: lead.plotId });
+ 
+diff --git a/server/src/controllers/plots.controller.ts b/server/src/controllers/plots.controller.ts
+index 9bb520e..b9189ea 100644
+--- a/server/src/controllers/plots.controller.ts
++++ b/server/src/controllers/plots.controller.ts
+@@ -15,7 +15,7 @@ export const getPlots = async (req: AuthenticatedRequest, res: Response) => {
+     status,
+     page,
+     pageSize,
+-    requester: { role: req.user?.role, email: req.user?.email }
++    requester: { userId: req.user?.sub, role: req.user?.role, email: req.user?.email }
+   });
+ 
+   return res.json({
+@@ -27,7 +27,7 @@ export const getPlots = async (req: AuthenticatedRequest, res: Response) => {
+ };
+ 
+ export const getPlot = async (req: AuthenticatedRequest, res: Response) => {
+-  const plot = await getPlotById(req.params.id, { role: req.user?.role, email: req.user?.email });
++  const plot = await getPlotById(req.params.id, { userId: req.user?.sub, role: req.user?.role, email: req.user?.email });
+   if (!plot) {
+     return res.status(404).json({
+       success: false,
+@@ -43,7 +43,7 @@ export const getPlot = async (req: AuthenticatedRequest, res: Response) => {
+ };
+ 
+ export const updatePlotHandler = async (req: AuthenticatedRequest, res: Response) => {
+-  const plot = await updatePlot(req.params.id, req.body);
++  const plot = await updatePlot(req.params.id, req.body, { userId: req.user?.sub, role: req.user?.role, email: req.user?.email });
+   await publishEvent("plot.updated", { plot });
+ 
+   return res.json({
+diff --git a/server/src/controllers/stats.controller.ts b/server/src/controllers/stats.controller.ts
+index 6f14c4d..a391d5f 100644
+--- a/server/src/controllers/stats.controller.ts
++++ b/server/src/controllers/stats.controller.ts
+@@ -3,7 +3,7 @@ import { getDashboardStats } from "../services/stats.service.js";
+ import type { AuthenticatedRequest } from "../middleware/auth.js";
+ 
+ export const getStats = async (req: AuthenticatedRequest, res: Response) => {
+-  const stats = await getDashboardStats({ userId: req.user?.sub, role: req.user?.role });
++  const stats = await getDashboardStats({ userId: req.user?.sub, role: req.user?.role, email: req.user?.email });
+ 
+   return res.json({
+     success: true,
+diff --git a/server/src/controllers/tracking.controller.ts b/server/src/controllers/tracking.controller.ts
+index 13fb164..d712fe8 100644
+--- a/server/src/controllers/tracking.controller.ts
++++ b/server/src/controllers/tracking.controller.ts
+@@ -5,7 +5,7 @@ import { publishEvent } from "../realtime/events.js";
+ import { listTrackingUpdates, upsertTrackingUpdate } from "../services/tracking.service.js";
+ 
+ export const listTracking = async (req: AuthenticatedRequest, res: Response) => {
+-  const updates = await listTrackingUpdates({ role: req.user?.role, email: req.user?.email });
++  const updates = await listTrackingUpdates({ userId: req.user?.sub, role: req.user?.role, email: req.user?.email });
+   return res.json({
+     success: true,
+     data: updates,
+@@ -25,7 +25,7 @@ export const upsertTracking = async (req: AuthenticatedRequest, res: Response) =
+     status: normalizedStatus,
+     address: req.body.address,
+     updatedBy: req.user?.sub
+-  });
++  }, { userId: req.user?.sub, role: req.user?.role, email: req.user?.email });
+ 
+   await publishEvent("tracking.updated", { tracking: saved });
+ 
+diff --git a/server/src/middleware/auth.ts b/server/src/middleware/auth.ts
+index 7a30a13..15eec20 100644
+--- a/server/src/middleware/auth.ts
++++ b/server/src/middleware/auth.ts
+@@ -1,12 +1,13 @@
+ import type { Request, Response, NextFunction } from "express";
+ import { env } from "../config/env.js";
+-import { verifyAccessToken, type AccessTokenPayload } from "../utils/tokens.js";
++import { type AccessTokenPayload } from "../utils/tokens.js";
++import { authenticateToken } from "../services/session.service.js";
+ 
+ export interface AuthenticatedRequest extends Request {
+   user?: AccessTokenPayload;
+ }
+ 
+-const extractToken = (req: Request) => {
++export const extractToken = (req: Request) => {
+   const authHeader = req.header("authorization");
+   if (authHeader && authHeader.startsWith("Bearer ")) {
+     return authHeader.replace("Bearer ", "").trim();
+@@ -16,7 +17,7 @@ const extractToken = (req: Request) => {
+   return cookieToken;
+ };
+ 
+-export const requireAuth = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
++export const requireAuth = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+   const token = extractToken(req);
+ 
+   if (!token) {
+@@ -27,14 +28,12 @@ export const requireAuth = (req: AuthenticatedRequest, res: Response, next: Next
+   }
+ 
+   try {
+-    const payload = verifyAccessToken(token);
++    const payload = await authenticateToken(token);
++    if (!payload) return res.status(401).json({ success: false, message: "Invalid or expired session" });
+     req.user = payload;
+     return next();
+   } catch (error) {
+-    return res.status(401).json({
+-      success: false,
+-      message: "Invalid or expired token"
+-    });
++    return next(error);
+   }
+ };
+ 
+@@ -55,4 +54,4 @@ export const requireRole = (...roles: string[]) =>
+     }
+ 
+     return next();
+-  };
+\ No newline at end of file
++  };
+diff --git a/server/src/middleware/cache.ts b/server/src/middleware/cache.ts
+index 62754e5..1afc422 100644
+--- a/server/src/middleware/cache.ts
++++ b/server/src/middleware/cache.ts
+@@ -8,6 +8,8 @@ const cacheStore = new LRUCache<string, any>({
+ 
+ export const cacheResponse = (ttlSeconds = 30) => (req: Request, res: Response, next: NextFunction) => {
+   const user = (req as any).user as { sub?: string; role?: string; email?: string } | undefined;
++  // Ownership and assignment changes must take effect on the next protected read.
++  if (user?.role === "CUSTOMER" || user?.role === "EMPLOYEE") return next();
+   const userKey = user ? `${user.sub ?? "anon"}:${user.role ?? "role"}:${user.email ?? "email"}` : "anonymous";
+   const key = `${req.method}:${req.originalUrl}:${userKey}`;
+ 
+diff --git a/server/src/middleware/errorHandler.ts b/server/src/middleware/errorHandler.ts
+index 27ae55d..ec36592 100644
+--- a/server/src/middleware/errorHandler.ts
++++ b/server/src/middleware/errorHandler.ts
+@@ -4,8 +4,16 @@ import { Prisma } from "@prisma/client";
+ import { logger } from "../config/logger.js";
+ import { env } from "../config/env.js";
+ import { HttpError } from "../utils/httpError.js";
++import { MulterError } from "multer";
+ 
+ export const errorHandler = (err: unknown, _req: Request, res: Response, _next: NextFunction) => {
++  if (err instanceof MulterError) {
++    const { code } = err as { code: string };
++    return res.status(code === "LIMIT_FILE_SIZE" ? 413 : 400).json({
++      success: false,
++      message: code === "LIMIT_FILE_SIZE" ? "File exceeds the 4 MiB limit" : "Invalid file upload"
++    });
++  }
+   if (err instanceof HttpError) {
+     return res.status(err.statusCode).json({
+       success: false,
+diff --git a/server/src/realtime/ws.ts b/server/src/realtime/ws.ts
+index 918936c..d3619dd 100644
+--- a/server/src/realtime/ws.ts
++++ b/server/src/realtime/ws.ts
+@@ -3,7 +3,8 @@ import { WebSocketServer, type WebSocket } from "ws";
+ import { parse as parseCookie } from "cookie";
+ import { env } from "../config/env.js";
+ import { logger } from "../config/logger.js";
+-import { verifyAccessToken } from "../utils/tokens.js";
++import { authenticateToken } from "../services/session.service.js";
++import { eventForRole } from "./visibility.js";
+ import { subscribe } from "./events.js";
+ 
+ const getTokenFromRequest = (req: IncomingMessage) => {
+@@ -42,7 +43,7 @@ export const attachWebSocketServer = (server: HttpServer) => {
+     clearInterval(interval);
+   });
+ 
+-  wss.on("connection", (socket: any, req: IncomingMessage) => {
++  wss.on("connection", async (socket: any, req: IncomingMessage) => {
+     const token = getTokenFromRequest(req);
+     if (!token) {
+       socket.close(1008, "Unauthorized");
+@@ -50,7 +51,10 @@ export const attachWebSocketServer = (server: HttpServer) => {
+     }
+ 
+     try {
+-      verifyAccessToken(token);
++      if (!await authenticateToken(token)) {
++        socket.close(1008, "Unauthorized");
++        return;
++      }
+     } catch (err) {
+       logger.warn({ err }, "WebSocket auth failed");
+       socket.close(1008, "Unauthorized");
+@@ -58,19 +62,28 @@ export const attachWebSocketServer = (server: HttpServer) => {
+     }
+ 
+     const ws = socket as any;
++    if (ws.readyState !== ws.OPEN) return;
+     ws.isAlive = true;
+     ws.on("pong", () => markAlive(ws));
+ 
+     ws.send(JSON.stringify({ type: "connected", ts: new Date().toISOString() }));
+ 
+     const unsubscribe = subscribe((event) => {
+-      if (ws.readyState === ws.OPEN) {
+-        ws.send(JSON.stringify(event));
+-      }
++      void authenticateToken(token).then(identity => {
++        if (!identity) { ws.close(1008, "Unauthorized"); return; }
++        if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(eventForRole(event, identity.role)));
++      }).catch(() => ws.close(1011, "Session check failed"));
+     });
+ 
++    const sessionCheck = setInterval(() => {
++      void authenticateToken(token).then(identity => {
++        if (!identity) ws.close(1008, "Unauthorized");
++      }).catch(() => ws.close(1011, "Session check failed"));
++    }, 25000);
++
+     ws.on("close", () => {
+       unsubscribe();
++      clearInterval(sessionCheck);
+     });
+   });
+ 
+diff --git a/server/src/routes/employeeAccess.routes.ts b/server/src/routes/employeeAccess.routes.ts
+index 025647b..8148cb5 100644
+--- a/server/src/routes/employeeAccess.routes.ts
++++ b/server/src/routes/employeeAccess.routes.ts
+@@ -13,6 +13,7 @@ import {
+ } from "../controllers/employeeAccess.controller.js";
+ 
+ const router = Router();
++const dateSchema = z.string().refine(value => value === "" || Number.isFinite(Date.parse(value)), "Invalid date").optional().nullable();
+ 
+ const employeeBaseSchema = z.object({
+   email: z.string().email(),
+@@ -29,7 +30,7 @@ const employeeBaseSchema = z.object({
+   lastName: z.string().trim().min(1).optional().nullable(),
+   emailVerified: z.boolean().optional(),
+   phoneVerified: z.boolean().optional(),
+-  dateOfBirth: z.string().optional().nullable(),
++  dateOfBirth: dateSchema,
+ 
+   yearsOfExperience: z.number().int().min(0).max(80).optional().nullable(),
+   currentCompany: z.string().trim().optional().nullable(),
+@@ -38,8 +39,8 @@ const employeeBaseSchema = z.object({
+   roleGiven: z.string().trim().optional().nullable(),
+   assignedLocationIds: z.array(z.string().trim().min(1)).optional().nullable(),
+   assignedVentureIds: z.array(z.string().trim().min(1)).optional().nullable(),
+-  dateOfJoining: z.string().optional().nullable(),
+-  dateOfRelieving: z.string().optional().nullable(),
++  dateOfJoining: dateSchema,
++  dateOfRelieving: dateSchema,
+   achievements: z.array(z.string().trim()).optional().nullable(),
+   status: z.enum(["ACTIVE", "FROZEN"]).optional()
+ });
+diff --git a/server/src/routes/leads.routes.ts b/server/src/routes/leads.routes.ts
+index 1ba7bb8..d9f316e 100644
+--- a/server/src/routes/leads.routes.ts
++++ b/server/src/routes/leads.routes.ts
+@@ -23,7 +23,7 @@ const createLeadSchema = z.object({
+ 
+ const updateLeadSchema = z.object({
+   notes: z.string().optional(),
+-  status: z.string().optional(),
++  status: z.enum(["NEW", "FOLLOW_UP", "QUALIFIED", "WON", "LOST"]).optional(),
+   pricePerSqYard: z.number().int().positive().optional(),
+   contactNumber: z.string().optional(),
+   location: z.string().optional(),
+diff --git a/server/src/routes/realtime.routes.ts b/server/src/routes/realtime.routes.ts
+index fdaf591..0f77c6f 100644
+--- a/server/src/routes/realtime.routes.ts
++++ b/server/src/routes/realtime.routes.ts
+@@ -1,7 +1,9 @@
+ import { Router } from "express";
+ import type { Request, Response } from "express";
+-import { requireAuth } from "../middleware/auth.js";
++import { requireAuth, extractToken } from "../middleware/auth.js";
+ import { subscribe } from "../realtime/events.js";
++import { authenticateToken } from "../services/session.service.js";
++import { eventForRole } from "../realtime/visibility.js";
+ 
+ const router = Router();
+ 
+@@ -14,14 +16,22 @@ router.get("/stream", requireAuth, (req: Request, res: Response) => {
+   res.write(`event: connected\n`);
+   res.write(`data: ${JSON.stringify({ ok: true, ts: new Date().toISOString() })}\n\n`);
+ 
++  const token = extractToken(req)!;
+   const unsubscribe = subscribe((event) => {
+-    res.write(`event: ${event.type}\n`);
+-    res.write(`id: ${event.id}\n`);
+-    res.write(`data: ${JSON.stringify(event)}\n\n`);
++    void authenticateToken(token).then((identity) => {
++      if (!identity) { res.end(); return; }
++      if (res.writableEnded) return;
++      res.write(`event: ${event.type}\n`);
++      res.write(`id: ${event.id}\n`);
++      res.write(`data: ${JSON.stringify(eventForRole(event, identity.role))}\n\n`);
++    }).catch(() => res.end());
+   });
+ 
+   const heartbeat = setInterval(() => {
+-    res.write(": ping\n\n");
++    void authenticateToken(token).then(identity => {
++      if (!identity) res.end();
++      else if (!res.writableEnded) res.write(": ping\n\n");
++    }).catch(() => res.end());
+   }, 25000);
+ 
+   res.on("close", () => {
+diff --git a/server/src/routes/tracking.routes.ts b/server/src/routes/tracking.routes.ts
+index 4e02612..cea27d7 100644
+--- a/server/src/routes/tracking.routes.ts
++++ b/server/src/routes/tracking.routes.ts
+@@ -13,8 +13,8 @@ const statusSchema = z
+ 
+ const trackingSchema = z.object({
+   customerId: z.string().min(1),
+-  latitude: z.number(),
+-  longitude: z.number(),
++  latitude: z.number().min(-90).max(90),
++  longitude: z.number().min(-180).max(180),
+   status: statusSchema.optional(),
+   address: z.string().optional()
+ });
+diff --git a/server/src/routes/ventures.routes.ts b/server/src/routes/ventures.routes.ts
+index 416175f..33e7ade 100644
+--- a/server/src/routes/ventures.routes.ts
++++ b/server/src/routes/ventures.routes.ts
+@@ -38,6 +38,13 @@ const createVentureSchema = z.object({
+   defaultPricePerSqYard: z.number().int().min(1)
+ });
+ 
++const regionSchema = z.object({
++  points: z.array(z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) })).min(3).max(500)
++});
++const regionsSchema = z.object({
++  regions: z.object({ roads: z.array(regionSchema).max(200), parks: z.array(regionSchema).max(200) })
++});
++
+ router.post(
+   "/ventures",
+   requireAuth,
+@@ -65,6 +72,7 @@ router.put(
+   "/ventures/:id/regions",
+   requireAuth,
+   requireRole("ADMIN"),
++  validate({ body: regionsSchema }),
+   asyncHandler(updateRegions)
+ );
+ 
+diff --git a/server/src/services/asset.service.ts b/server/src/services/asset.service.ts
+index 73b121b..f10483c 100644
+--- a/server/src/services/asset.service.ts
++++ b/server/src/services/asset.service.ts
+@@ -1,10 +1,28 @@
+ import { prisma } from "../config/prisma.js";
+ import { randomUUID } from "node:crypto";
++import { HttpError } from "../utils/httpError.js";
++
++// Verify signatures before trusting a multipart MIME label. SVG remains untrusted
++// active content and is sandboxed when served; this is not an SVG sanitizer.
++export const checkedContentType = (file: Pick<Express.Multer.File, "mimetype" | "buffer">) => {
++  const bytes = file.buffer;
++  if (!bytes.length || bytes.length > 4 * 1024 * 1024) throw new HttpError(400, "Invalid file size");
++  const type = file.mimetype === "image/jpg" ? "image/jpeg" : file.mimetype;
++  const valid = type === "image/png" ? bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
++    : type === "image/jpeg" ? bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
++    : type === "image/webp" ? bytes.subarray(0, 4).toString() === "RIFF" && bytes.subarray(8, 12).toString() === "WEBP"
++    : type === "application/pdf" ? bytes.subarray(0, 5).toString() === "%PDF-"
++    : type === "image/svg+xml" ? /^\s*(?:<\?xml[^?]*\?>\s*)?(?:<!--[\s\S]*?-->\s*)*<svg(?:\s|>)/i.test(bytes.toString("utf8"))
++    : false;
++  if (!valid) throw new HttpError(400, "File content does not match its supported type");
++  return type;
++};
+ 
+ export const saveVentureAsset = async (ventureId: string, file: Express.Multer.File) => {
++  const contentType = checkedContentType(file);
+   const id = randomUUID();
+   await prisma.ventureAsset.create({
+-    data: { id, ventureId, filename: file.originalname, contentType: file.mimetype, data: file.buffer }
++    data: { id, ventureId, filename: file.originalname, contentType, data: file.buffer }
+   });
+   return `/uploads/assets/${id}`;
+ };
+diff --git a/server/src/services/customer.service.ts b/server/src/services/customer.service.ts
+index 052f9d5..07d6217 100644
+--- a/server/src/services/customer.service.ts
++++ b/server/src/services/customer.service.ts
+@@ -1,5 +1,8 @@
+ import { prisma } from "../config/prisma.js";
+ import { getPagination } from "../utils/pagination.js";
++import { recordAccessWhere, type Requester } from "./access.service.js";
++import { HttpError } from "../utils/httpError.js";
++import { preserveCustomerEmailLines, stripCustomerEmailLines } from "../utils/customerNotes.js";
+ 
+ type CustomerStatus = "HOT_LEAD" | "FOLLOWING_UP" | "CONFIRMED_NOT_PAID" | "PAID_ADVANCE" | "BOOKED";
+ 
+@@ -11,48 +14,10 @@ const deriveInterestedFromStatus = (status?: CustomerStatus) => {
+ export const listCustomerRecords = async (filters: {
+   page?: number;
+   pageSize?: number;
+-  requester?: { userId?: string; role?: string; email?: string; displayName?: string };
++  requester?: Requester;
+ }) => {
+   const { skip, take, page, pageSize } = getPagination(filters.page, filters.pageSize);
+-  const where: any = {};
+-
+-  if (filters.requester?.role === "CUSTOMER" && filters.requester.email) {
+-    where.OR = [
+-      { notes: { contains: `Email: ${filters.requester.email}` } },
+-      { notes: { contains: filters.requester.email } }
+-    ];
+-  }
+-
+-  if (filters.requester?.role === "EMPLOYEE") {
+-    const ownerAliases = new Set<string>();
+-    if (filters.requester.email?.trim()) ownerAliases.add(filters.requester.email.trim());
+-    if (filters.requester.displayName?.trim()) ownerAliases.add(filters.requester.displayName.trim());
+-
+-    if (filters.requester.userId) {
+-      const me = await prisma.user.findUnique({
+-        where: { id: filters.requester.userId },
+-        select: { fullName: true, displayName: true, email: true, employeeId: true }
+-      });
+-
+-      if (me?.fullName?.trim()) ownerAliases.add(me.fullName.trim());
+-      if (me?.displayName?.trim()) ownerAliases.add(me.displayName.trim());
+-      if (me?.email?.trim()) ownerAliases.add(me.email.trim());
+-      if (me?.employeeId?.trim()) ownerAliases.add(me.employeeId.trim());
+-    }
+-
+-    const aliases = Array.from(ownerAliases);
+-    if (!aliases.length) {
+-      where.id = "__no_employee_alias_match__";
+-    } else {
+-      where.OR = [
+-        ...(where.OR ?? []),
+-        { leadName: { in: aliases } },
+-        { recordOwner: { in: aliases } }
+-      ];
+-    }
+-  }
+-
+-  const finalWhere = Object.keys(where).length ? where : undefined;
++  const finalWhere = await recordAccessWhere(filters.requester);
+ 
+   const [total, records] = await Promise.all([
+     prisma.customerRecord.count({ where: finalWhere }),
+@@ -95,9 +60,9 @@ export const createCustomerRecord = async (input: {
+       : null;
+ 
+   const employeeOwner =
++    ownerOverride?.email?.trim() ||
+     ownerOverride?.fullName?.trim() ||
+     ownerOverride?.displayName?.trim() ||
+-    ownerOverride?.email?.trim() ||
+     requester?.displayName?.trim() ||
+     requester?.email?.trim();
+ 
+@@ -116,7 +81,7 @@ export const createCustomerRecord = async (input: {
+       status: input.status ?? "FOLLOWING_UP",
+       recordOwner: effectiveOwner,
+       leadName: effectiveLeadName,
+-      notes: input.notes
++      notes: input.notes === undefined ? undefined : stripCustomerEmailLines(input.notes)
+     }
+   });
+ };
+@@ -132,6 +97,9 @@ export const updateCustomerRecord = async (id: string, update: {
+   leadName?: string;
+   notes?: string;
+ }, requester?: { userId?: string; role?: string; email?: string; displayName?: string }) => {
++  const scope = await recordAccessWhere(requester);
++  const existing = await prisma.customerRecord.findFirst({ where: { id, AND: [scope] }, select: { notes: true } });
++  if (!existing) throw new HttpError(404, "Customer record not found");
+   const ownerOverride =
+     requester?.role === "EMPLOYEE"
+       ? await prisma.user.findUnique({
+@@ -141,9 +109,9 @@ export const updateCustomerRecord = async (id: string, update: {
+       : null;
+ 
+   const employeeOwner =
++    ownerOverride?.email?.trim() ||
+     ownerOverride?.fullName?.trim() ||
+     ownerOverride?.displayName?.trim() ||
+-    ownerOverride?.email?.trim() ||
+     requester?.displayName?.trim() ||
+     requester?.email?.trim();
+ 
+@@ -153,7 +121,7 @@ export const updateCustomerRecord = async (id: string, update: {
+   const interested = update.interested ?? deriveInterestedFromStatus(update.status);
+ 
+   return prisma.customerRecord.update({
+-    where: { id },
++    where: { id, AND: [scope, { notes: existing.notes }] },
+     data: {
+       contactName: update.contactName,
+       contactNumber: update.contactNumber,
+@@ -163,13 +131,13 @@ export const updateCustomerRecord = async (id: string, update: {
+       ...(update.status ? { status: update.status } : {}),
+       recordOwner: effectiveOwner,
+       leadName: effectiveLeadName,
+-      notes: update.notes
++      notes: update.notes === undefined ? undefined : preserveCustomerEmailLines(update.notes, existing.notes)
+     }
+   });
+ };
+ 
+-export const deleteCustomerRecord = async (id: string) => {
++export const deleteCustomerRecord = async (id: string, requester?: Requester) => {
+   return prisma.customerRecord.delete({
+-    where: { id }
++    where: { id, AND: [await recordAccessWhere(requester)] }
+   });
+ };
+diff --git a/server/src/services/favorite.service.ts b/server/src/services/favorite.service.ts
+index 6c4c39f..e2d72be 100644
+--- a/server/src/services/favorite.service.ts
++++ b/server/src/services/favorite.service.ts
+@@ -1,8 +1,9 @@
+ import { prisma } from "../config/prisma.js";
++import { assertPlotAccess, plotAccessWhere, type Requester } from "./access.service.js";
+ 
+-export const listFavorites = async (userId: string) => {
++export const listFavorites = async (userId: string, requester?: Requester) => {
+   return prisma.favorite.findMany({
+-    where: { userId },
++    where: { userId, plot: await plotAccessWhere(requester) },
+     include: {
+       plot: {
+         include: {
+@@ -14,7 +15,8 @@ export const listFavorites = async (userId: string) => {
+   });
+ };
+ 
+-export const addFavorite = async (userId: string, plotId: string) => {
++export const addFavorite = async (userId: string, plotId: string, requester?: Requester) => {
++  await assertPlotAccess(plotId, requester);
+   return prisma.favorite.create({
+     data: {
+       userId,
+@@ -32,4 +34,4 @@ export const removeFavorite = async (userId: string, plotId: string) => {
+       }
+     }
+   });
+-};
+\ No newline at end of file
++};
+diff --git a/server/src/services/lead.service.ts b/server/src/services/lead.service.ts
+index d841a9b..1c2e0f3 100644
+--- a/server/src/services/lead.service.ts
++++ b/server/src/services/lead.service.ts
+@@ -1,15 +1,17 @@
+ import { prisma } from "../config/prisma.js";
+ import { getPagination } from "../utils/pagination.js";
++import { plotAccessWhere, assertPlotAccess, recordAccessWhere, type Requester } from "./access.service.js";
++import { stripCustomerEmailLines } from "../utils/customerNotes.js";
+ 
+ export const listLeads = async (filters: {
+   plotId?: string;
+   page?: number;
+   pageSize?: number;
+-  requester?: { role?: string; email?: string };
++  requester?: Requester;
+ }) => {
+   const { skip, take, page, pageSize } = getPagination(filters.page, filters.pageSize);
+ 
+-  const where: any = {};
++  const where: any = { plot: await plotAccessWhere(filters.requester) };
+   if (filters.plotId) where.plotId = filters.plotId;
+   if (filters.requester?.role === "CUSTOMER" && filters.requester.email) {
+     where.email = filters.requester.email;
+@@ -55,7 +57,9 @@ export const createLead = async (input: {
+   notes?: string;
+   photoUrl?: string;
+   agentId?: string;
+-}) => {
++}, requester?: Requester) => {
++  await assertPlotAccess(input.plotId, requester);
++  if (requester?.role === "EMPLOYEE") input = { ...input, agentId: requester.userId };
+   return prisma.$transaction(async (tx) => {
+     const lead = await tx.lead.create({
+       data: {
+@@ -84,7 +88,7 @@ export const createLead = async (input: {
+       input.agentId ? tx.user.findUnique({ where: { id: input.agentId } }) : Promise.resolve(null)
+     ]);
+ 
+-    const recordOwner = agent?.fullName || agent?.displayName || agent?.email || "Unknown";
++    const recordOwner = agent?.email || agent?.fullName || agent?.displayName || "Unknown";
+     const ventureName = plot?.venture?.name || "";
+     const plotInterested = plot?.plotNumber || input.plotNumber || "";
+     const locationName = plot?.venture?.location?.name || input.location;
+@@ -97,13 +101,14 @@ export const createLead = async (input: {
+     if (input.email) metaLines.push(`Email: ${input.email}`);
+     if (input.uniqueId) metaLines.push(`Unique ID: ${input.uniqueId}`);
+ 
+-    const incomingNotes = input.notes?.trim();
++    const incomingNotes = input.notes === undefined ? undefined : stripCustomerEmailLines(input.notes).trim();
+ 
+     const existing = await tx.customerRecord.findFirst({
+       where: {
+         contactName: input.customerName,
+         contactNumber: input.contactNumber,
+-        location: locationName
++        location: locationName,
++        AND: [await recordAccessWhere(requester)]
+       },
+       orderBy: { createdAt: "desc" }
+     });
+@@ -177,9 +182,9 @@ export const updateLead = async (id: string, update: {
+   contactNumber?: string;
+   location?: string;
+   uniqueId?: string;
+-}) => {
++}, requester?: Requester) => {
+   return prisma.lead.update({
+-    where: { id },
++    where: { id, plot: await plotAccessWhere(requester) },
+     data: {
+       notes: update.notes,
+       status: update.status as any,
+@@ -191,8 +196,8 @@ export const updateLead = async (id: string, update: {
+   });
+ };
+ 
+-export const deleteLead = async (id: string) => {
++export const deleteLead = async (id: string, requester?: Requester) => {
+   return prisma.lead.delete({
+-    where: { id }
++    where: { id, plot: await plotAccessWhere(requester) }
+   });
+ };
+diff --git a/server/src/services/plot.service.ts b/server/src/services/plot.service.ts
+index b522f5e..8ac4bbb 100644
+--- a/server/src/services/plot.service.ts
++++ b/server/src/services/plot.service.ts
+@@ -2,23 +2,22 @@ import type { PlotStatus } from "@prisma/client";
+ import { prisma } from "../config/prisma.js";
+ import { getPagination } from "../utils/pagination.js";
+ import { HttpError } from "../utils/httpError.js";
++import { plotAccessWhere, type Requester } from "./access.service.js";
+ 
+ export const listPlots = async (filters: {
+   ventureId?: string;
+   status?: PlotStatus;
+   page?: number;
+   pageSize?: number;
+-  requester?: { role?: string; email?: string };
++  requester?: Requester;
+ }) => {
+   const { skip, take, page, pageSize } = getPagination(filters.page, filters.pageSize);
+ 
+   const where: any = {
+     ventureId: filters.ventureId,
+-    status: filters.status
++    status: filters.status,
++    AND: [await plotAccessWhere(filters.requester)]
+   };
+-  if (filters.requester?.role === "CUSTOMER" && filters.requester.email) {
+-    where.leads = { some: { email: filters.requester.email } };
+-  }
+ 
+   const [total, plots] = await Promise.all([
+     prisma.plot.count({ where }),
+@@ -46,19 +45,17 @@ export const listPlots = async (filters: {
+   };
+ };
+ 
+-export const getPlotById = async (id: string, requester?: { role?: string; email?: string }) => {
++export const getPlotById = async (id: string, requester?: Requester) => {
+   return prisma.plot.findFirst({
+     where: {
+       id,
+-      ...(requester?.role === "CUSTOMER" && requester.email
+-        ? { leads: { some: { email: requester.email } } }
+-        : {})
++      AND: [await plotAccessWhere(requester)]
+     },
+     include: {
+       venture: {
+         include: { location: true }
+       },
+-      leads: true
++      leads: requester?.role === "CUSTOMER" ? { where: { email: requester.email ?? "" } } : true
+     }
+   });
+ };
+@@ -68,9 +65,9 @@ export const updatePlot = async (id: string, update: {
+   area?: number;
+   pricePerSqYard?: number;
+   plotNumber?: string;
+-}) => {
++}, requester?: Requester) => {
+   return prisma.plot.update({
+-    where: { id },
++    where: { id, AND: [await plotAccessWhere(requester)] },
+     data: {
+       status: update.status,
+       area: update.area,
+diff --git a/server/src/services/stats.service.ts b/server/src/services/stats.service.ts
+index 24e2eae..8738648 100644
+--- a/server/src/services/stats.service.ts
++++ b/server/src/services/stats.service.ts
+@@ -1,12 +1,24 @@
+ import { prisma } from "../config/prisma.js";
+ import { getEmployeeAssignment } from "./employeeAssignment.service.js";
++import { plotAccessWhere, recordAccessWhere, employeeOwnerAliases, requireRequester, type Requester } from "./access.service.js";
+ 
+-export const getDashboardStats = async (requester?: { userId?: string; role?: string }) => {
++export const getDashboardStats = async (requester?: Requester) => {
++  requireRequester(requester);
++  if (requester?.role === "CUSTOMER") {
++    const scope = await plotAccessWhere(requester);
++    const records = await recordAccessWhere(requester);
++    const [locations, plots, customers, leads, available, advance, sold] = await Promise.all([
++      prisma.location.count({ where: { ventures: { some: { plots: { some: scope } } } } }),
++      prisma.plot.count({ where: scope }),
++      prisma.customerRecord.count({ where: records }),
++      prisma.lead.count({ where: { email: requester.email ?? "", plot: scope } }),
++      prisma.plot.count({ where: { AND: [scope], status: "AVAILABLE" } }),
++      prisma.plot.count({ where: { AND: [scope], status: "ADVANCE" } }),
++      prisma.plot.count({ where: { AND: [scope], status: "SOLD" } })
++    ]);
++    return { locations, plots, employees: 0, customers, leads, plotsByStatus: { available, advance, sold } };
++  }
+   if (requester?.role === "EMPLOYEE" && requester.userId) {
+-    const me = await prisma.user.findUnique({
+-      where: { id: requester.userId },
+-      select: { fullName: true, displayName: true, email: true, employeeId: true }
+-    });
+     const profile = await prisma.employeeProfile.findUnique({
+       where: { userId: requester.userId },
+       select: { status: true }
+@@ -53,13 +65,7 @@ export const getDashboardStats = async (requester?: { userId?: string; role?: st
+       };
+     }
+ 
+-    const ownerAliases = Array.from(
+-      new Set(
+-        [me?.fullName, me?.displayName, me?.email, me?.employeeId]
+-          .map((value) => value?.trim())
+-          .filter((value): value is string => Boolean(value))
+-      )
+-    );
++    const ownerAliases = await employeeOwnerAliases(requester);
+ 
+     const [plots, customers, leads, available, advance, sold] = await Promise.all([
+       prisma.plot.count({ where: { ventureId: { in: ventureIds } } }),
+diff --git a/server/src/services/tracking.service.ts b/server/src/services/tracking.service.ts
+index 0914f65..89b7de8 100644
+--- a/server/src/services/tracking.service.ts
++++ b/server/src/services/tracking.service.ts
+@@ -1,5 +1,6 @@
+ import { prisma } from "../config/prisma.js";
+ import type { TrackingStatus } from "@prisma/client";
++import { recordAccessWhere, assertRecordAccess, type Requester } from "./access.service.js";
+ 
+ export interface TrackingUpdateInput {
+   customerId: string;
+@@ -10,18 +11,8 @@ export interface TrackingUpdateInput {
+   updatedBy?: string;
+ }
+ 
+-export const listTrackingUpdates = async (requester?: { role?: string; email?: string }) => {
+-  const where =
+-    requester?.role === "CUSTOMER" && requester.email
+-      ? {
+-          customer: {
+-            OR: [
+-              { notes: { contains: `Email: ${requester.email}` } },
+-              { notes: { contains: requester.email } }
+-            ]
+-          }
+-        }
+-      : undefined;
++export const listTrackingUpdates = async (requester?: Requester) => {
++  const where = { customer: await recordAccessWhere(requester) };
+ 
+   return prisma.trackingUpdate.findMany({
+     where,
+@@ -29,7 +20,8 @@ export const listTrackingUpdates = async (requester?: { role?: string; email?: s
+   });
+ };
+ 
+-export const upsertTrackingUpdate = async (update: TrackingUpdateInput) => {
++export const upsertTrackingUpdate = async (update: TrackingUpdateInput, requester?: Requester) => {
++  await assertRecordAccess(update.customerId, requester);
+   return prisma.trackingUpdate.upsert({
+     where: { customerId: update.customerId },
+     create: {
+diff --git a/server/src/utils/pagination.ts b/server/src/utils/pagination.ts
+index a92000a..a0de7b2 100644
+--- a/server/src/utils/pagination.ts
++++ b/server/src/utils/pagination.ts
+@@ -1,6 +1,6 @@
+ export const getPagination = (page?: number, pageSize?: number) => {
+-  const safePage = Math.max(1, page ?? 1);
+-  const safeSize = Math.min(100, Math.max(1, pageSize ?? 20));
++  const safePage = Number.isSafeInteger(page) && page! > 0 ? page! : 1;
++  const safeSize = Number.isSafeInteger(pageSize) && pageSize! > 0 ? Math.min(100, pageSize!) : 20;
+   const skip = (safePage - 1) * safeSize;
+ 
+   return {
+@@ -9,4 +9,4 @@ export const getPagination = (page?: number, pageSize?: number) => {
+     skip,
+     take: safeSize
+   };
+-};
+\ No newline at end of file
++};
+diff --git a/server/src/realtime/visibility.ts b/server/src/realtime/visibility.ts
+new file mode 100644
+index 0000000..247b9fb
+--- /dev/null
++++ b/server/src/realtime/visibility.ts
+@@ -0,0 +1,9 @@
++import type { RealtimeEvent } from "./events.js";
++
++export const eventForRole = (event: RealtimeEvent, role: string): RealtimeEvent => ({
++  id: event.id,
++  type: event.type,
++  createdAt: event.createdAt,
++  // The web client invalidates queries by event name; only admins need toast details.
++  payload: role === "ADMIN" ? event.payload : {}
++});
+diff --git a/server/src/services/access.service.ts b/server/src/services/access.service.ts
+new file mode 100644
+index 0000000..185ad3f
+--- /dev/null
++++ b/server/src/services/access.service.ts
+@@ -0,0 +1,91 @@
++import type { Prisma } from "@prisma/client";
++import { prisma } from "../config/prisma.js";
++import { HttpError } from "../utils/httpError.js";
++import { getEmployeeAssignment } from "./employeeAssignment.service.js";
++
++export interface Requester {
++  userId?: string;
++  role?: string;
++  email?: string;
++  displayName?: string;
++}
++
++export const requireRequester = (requester?: Requester): Requester => {
++  if (!requester?.userId) throw new HttpError(401, "Authentication required");
++  if (!["ADMIN", "EMPLOYEE", "AGENT", "CUSTOMER"].includes(requester.role ?? "")) {
++    throw new HttpError(403, "Insufficient permissions");
++  }
++  return requester;
++};
++
++export const plotAccessWhere = async (requester?: Requester): Promise<Prisma.PlotWhereInput> => {
++  const actor = requireRequester(requester);
++  if (actor.role === "CUSTOMER") {
++    return actor.email ? { leads: { some: { email: actor.email } } } : { id: { in: [] } };
++  }
++  if (actor.role === "EMPLOYEE") {
++    const assignment = await getEmployeeAssignment(actor.userId!);
++    return { venture: { OR: [
++      { id: { in: assignment.assignedVentureIds } },
++      { locationId: { in: assignment.assignedLocationIds } }
++    ] } };
++  }
++  return {};
++};
++
++export const assertPlotAccess = async (plotId: string, requester?: Requester) => {
++  const scope = await plotAccessWhere(requester);
++  const plot = await prisma.plot.findFirst({ where: { id: plotId, AND: [scope] }, select: { id: true } });
++  if (!plot) throw new HttpError(404, "Plot not found");
++};
++
++export const hasCustomerEmail = (notes: string | null, email: string) => {
++  // Legacy records encode ownership as a dedicated line; incidental text grants nothing.
++  const expected = email.trim().toLowerCase();
++  const ownerLines = (notes ?? "").split(/\r?\n/).map(line => line.trim()).filter(line => /^Email:/i.test(line));
++  if (!expected || ownerLines.length !== 1) return false;
++  const match = /^Email:\s*(\S+)\s*$/i.exec(ownerLines[0]);
++  return match?.[1].toLowerCase() === expected;
++};
++
++export const employeeOwnerAliases = async (requester: Requester): Promise<string[]> => {
++  const me = await prisma.user.findUnique({
++    where: { id: requester.userId! },
++    select: { email: true, fullName: true, displayName: true, employeeId: true }
++  });
++  if (!me) return [];
++  const aliases = [...new Set([me.email, me.fullName, me.displayName, me.employeeId].filter((v): v is string => Boolean(v?.trim())).map(v => v.trim()))];
++  const unambiguous: string[] = [];
++  for (const alias of aliases) {
++    const others = await prisma.user.count({ where: { id: { not: requester.userId }, OR: [
++      { email: alias }, { fullName: alias }, { displayName: alias }, { employeeId: alias }
++    ] } });
++    if (!others) unambiguous.push(alias);
++  }
++  return unambiguous;
++};
++
++export const recordAccessWhere = async (requester?: Requester): Promise<Prisma.CustomerRecordWhereInput> => {
++  const actor = requireRequester(requester);
++  if (actor.role === "CUSTOMER") {
++    if (!actor.email) return { id: { in: [] } };
++    // shortcut: legacy notes need exact parsing, replace with a durable customer FK in a reviewed migration.
++    const candidates = await prisma.customerRecord.findMany({
++      where: { notes: { contains: actor.email } }, select: { id: true, notes: true }
++    });
++    // Keep the ownership-bearing value in the final query too, so a concurrent
++    // edit cannot turn an earlier candidate into an authorized foreign record.
++    return { OR: candidates.filter(row => hasCustomerEmail(row.notes, actor.email!)).map(row => ({ id: row.id, notes: row.notes })) };
++  }
++  if (actor.role === "EMPLOYEE") {
++    const aliases = await employeeOwnerAliases(actor);
++    return { OR: [{ recordOwner: { in: aliases } }, { leadName: { in: aliases } }] };
++  }
++  return {};
++};
++
++export const assertRecordAccess = async (id: string, requester?: Requester) => {
++  const scope = await recordAccessWhere(requester);
++  const record = await prisma.customerRecord.findFirst({ where: { id, AND: [scope] }, select: { id: true } });
++  if (!record) throw new HttpError(404, "Customer record not found");
++};
+diff --git a/server/src/services/session.service.ts b/server/src/services/session.service.ts
+new file mode 100644
+index 0000000..d4f3bfe
+--- /dev/null
++++ b/server/src/services/session.service.ts
+@@ -0,0 +1,18 @@
++import { prisma } from "../config/prisma.js";
++import { verifyAccessToken, type AccessTokenPayload } from "../utils/tokens.js";
++
++export const authenticateToken = async (token: string): Promise<AccessTokenPayload | null> => {
++  let claims: AccessTokenPayload;
++  try { claims = verifyAccessToken(token); } catch { return null; }
++  if (typeof claims.sub !== "string") return null;
++  const user = await prisma.user.findUnique({
++    where: { id: claims.sub },
++    select: { id: true, role: true, email: true, displayName: true,
++      employeeProfile: { select: { status: true, dateOfRelieving: true } } }
++  });
++  if (!user || !["ADMIN", "EMPLOYEE", "AGENT", "CUSTOMER"].includes(user.role)) return null;
++  const profile = user.employeeProfile;
++  if (user.role === "EMPLOYEE" && (profile?.status === "FROZEN" ||
++    (profile?.dateOfRelieving && profile.dateOfRelieving <= new Date()))) return null;
++  return { sub: user.id, role: user.role, email: user.email, displayName: user.displayName };
++};
+diff --git a/server/src/utils/customerNotes.ts b/server/src/utils/customerNotes.ts
+new file mode 100644
+index 0000000..9029e98
+--- /dev/null
++++ b/server/src/utils/customerNotes.ts
+@@ -0,0 +1,11 @@
++const isOwnershipLine = (line: string) => /^Email:/i.test(line.trim());
++
++export const stripCustomerEmailLines = (notes: string) =>
++  notes.split(/\r?\n/).filter(line => !isOwnershipLine(line)).join("\n");
++
++export const preserveCustomerEmailLines = (notes: string, existingNotes: string | null) => {
++  // Free-text edits cannot create, transfer or remove the legacy access key.
++  // Preserve ambiguous legacy headers as-is so editing notes cannot grant access.
++  const ownership = (existingNotes ?? "").split(/\r?\n/).filter(isOwnershipLine);
++  return [...ownership, stripCustomerEmailLines(notes)].join("\n");
++};
+diff --git a/server/tests/authorization.test.cjs b/server/tests/authorization.test.cjs
+new file mode 100644
+index 0000000..3692d92
+--- /dev/null
++++ b/server/tests/authorization.test.cjs
+@@ -0,0 +1,305 @@
++const { test, before, after, beforeEach, afterEach, mock } = require('node:test');
++const assert = require('node:assert/strict');
++process.env.NODE_ENV = 'test';
++process.env.DATABASE_URL = 'mysql://unused:unused@127.0.0.1:1/unused_test';
++process.env.JWT_SECRET = 'local-test-signing-key-never-used-outside-tests';
++process.env.LOG_LEVEL = 'silent';
++process.env.REALTIME_REDIS_URL = '';
++// Inject before loading the app: any unexpected persistence operation fails locally.
++// Neither a Prisma client nor a database connection is created by this suite.
++const prisma = {};
++for (const model of ['user', 'employeeProfile', 'employeeAssignment', 'customerRecord', 'plot', 'favorite', 'trackingUpdate', 'lead', 'location', 'venture', 'ventureAsset']) {
++  prisma[model] = {};
++  for (const operation of ['findUnique', 'findFirst', 'findMany', 'count', 'create', 'update', 'delete', 'upsert', 'deleteMany']) {
++    prisma[model][operation] = async () => { throw new Error(`Unexpected persistence operation: ${model}.${operation}`); };
++  }
++}
++prisma.$disconnect = async () => {};
++prisma.$transaction = async (work) => typeof work === 'function' ? work(prisma) : Promise.all(work);
++const prismaModule = require.resolve('../dist/config/prisma.js');
++require.cache[prismaModule] = { id: prismaModule, filename: prismaModule, loaded: true, exports: { prisma } };
++const { createApp } = require('../dist/app.js');
++const { signAccessToken } = require('../dist/utils/tokens.js');
++const { HttpError } = require('../dist/utils/httpError.js');
++const { hasCustomerEmail, recordAccessWhere, plotAccessWhere } = require('../dist/services/access.service.js');
++const { eventForRole } = require('../dist/realtime/visibility.js');
++const { publishEvent } = require('../dist/realtime/events.js');
++const { attachWebSocketServer } = require('../dist/realtime/ws.js');
++const WebSocket = require('ws');
++const { once } = require('node:events');
++let server, wss, base, users, records, plots, mutations, assignment;
++const actor = (id) => ({ userId: id, ...users[id] });
++const token = (id) => signAccessToken({ sub: id, ...users[id] });
++// In-memory query adapter exercises HTTP -> route -> service -> Prisma query contracts.
++// This does not replace the separately required MySQL integration suite.
++const matches = (row, query = {}) => Object.entries(query).every(([key, value]) => {
++  if (value === undefined) return true;
++  if (key === 'AND') return (Array.isArray(value) ? value : [value]).every(q => matches(row, q));
++  if (key === 'OR') return value.some(q => matches(row, q));
++  const actual = row?.[key];
++  if (value && typeof value === 'object') {
++    if ('in' in value) return value.in.includes(actual);
++    if ('not' in value) return actual !== value.not;
++    if ('contains' in value) return String(actual ?? '').toLowerCase().includes(value.contains.toLowerCase());
++    if ('some' in value) return (actual ?? []).some(item => matches(item, value.some));
++    return matches(actual, value);
++  }
++  return actual === value;
++});
++const absent = () => { throw new HttpError(404, 'Record not found'); };
++before(async () => {
++  server = createApp().listen(0, '127.0.0.1');
++  wss = attachWebSocketServer(server);
++  await new Promise(resolve => server.once('listening', resolve));
++  base = `http://127.0.0.1:${server.address().port}/api`;
++});
++after(async () => { for (const client of wss.clients) client.terminate(); await new Promise(resolve => wss.close(resolve)); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await prisma.$disconnect(); });
++beforeEach(() => {
++  mutations = 0;
++  assignment = { assignedLocationIds: [], assignedVentureIds: ['assigned-venture'] };
++  users = Object.fromEntries(['ADMIN', 'EMPLOYEE', 'AGENT', 'CUSTOMER'].map(role => [role, {
++    id: role, role, email: `${role.toLowerCase()}@example.test`, displayName: role, fullName: role,
++    employeeProfile: role === 'EMPLOYEE' ? { status: 'ACTIVE', dateOfRelieving: null } : null
++  }]));
++  records = [
++    { id: 'own-record', recordOwner: 'employee@example.test', leadName: 'EMPLOYEE', notes: 'Email: customer@example.test\nUnique ID: ONE' },
++    { id: 'foreign-record', recordOwner: 'other@example.test', notes: 'Email: other@example.test' },
++    { id: 'suffix-record', recordOwner: 'other@example.test', notes: 'Email: notcustomer@example.test' },
++    { id: 'incidental-record', recordOwner: 'other@example.test', notes: 'Ask customer@example.test about a different customer.' }
++  ];
++  plots = [
++    { id: 'own-plot', ventureId: 'assigned-venture', venture: { id: 'assigned-venture', locationId: 'assigned-location' }, leads: [{ id: 'own-lead', email: 'customer@example.test' }, { id: 'other-lead', email: 'other@example.test' }] },
++    { id: 'foreign-plot', ventureId: 'foreign-venture', venture: { id: 'foreign-venture', locationId: 'foreign-location' }, leads: [{ id: 'foreign-lead', email: 'other@example.test' }] }
++  ];
++  mock.method(prisma.user, 'findUnique', async ({ where }) => users[where.id] ?? null);
++  mock.method(prisma.user, 'findFirst', async ({ where }) => Object.values(users).find(u => matches(u, where)) ?? null);
++  mock.method(prisma.user, 'count', async ({ where }) => Object.values(users).filter(u => matches(u, where)).length);
++  mock.method(prisma.employeeAssignment, 'findUnique', async () => assignment);
++  mock.method(prisma.employeeProfile, 'findUnique', async ({ where }) => users[where.userId]?.employeeProfile ?? null);
++  mock.method(prisma.employeeProfile, 'upsert', async ({ where, update }) => { mutations++; return Object.assign(users[where.userId].employeeProfile, update); });
++  mock.method(prisma.user, 'update', async ({ where, data }) => { const user = Object.values(users).find(row => matches(row, where)); if (!user) return absent(); mutations++; return { ...user, ...data, employeeProfile: user.employeeProfile }; });
++  mock.method(prisma.customerRecord, 'findMany', async ({ where, skip = 0, take }) => records.filter(r => matches(r, where)).slice(skip, take == null ? undefined : skip + take));
++  mock.method(prisma.customerRecord, 'count', async ({ where }) => records.filter(r => matches(r, where)).length);
++  mock.method(prisma.customerRecord, 'findFirst', async ({ where }) => records.find(r => matches(r, where)) ?? null);
++  mock.method(prisma.customerRecord, 'create', async ({ data }) => { mutations++; const row = { id: 'new-record', ...data }; records.push(row); return row; });
++  for (const action of ['update', 'delete']) mock.method(prisma.customerRecord, action, async ({ where, data }) => {
++    const row = records.find(r => matches(r, where)); if (!row) return absent(); mutations++; return Object.assign(row, Object.fromEntries(Object.entries(data ?? {}).filter(([, value]) => value !== undefined)));
++  });
++  mock.method(prisma.plot, 'findFirst', async ({ where, include }) => {
++    const plot = plots.find(p => matches(p, where)); if (!plot) return null;
++    return { ...plot, leads: include?.leads?.where ? plot.leads.filter(l => matches(l, include.leads.where)) : plot.leads };
++  });
++  mock.method(prisma.plot, 'findMany', async ({ where }) => plots.filter(p => matches(p, where)));
++  mock.method(prisma.plot, 'findUnique', async ({ where }) => plots.find(p => matches(p, where)) ?? null);
++  mock.method(prisma.plot, 'count', async ({ where }) => plots.filter(p => matches(p, where)).length);
++  mock.method(prisma.plot, 'update', async ({ where, data }) => { const row = plots.find(p => matches(p, where)); if (!row) return absent(); mutations++; return { ...row, ...data }; });
++  mock.method(prisma.favorite, 'create', async ({ data }) => { mutations++; return { id: 'favorite', ...data }; });
++  mock.method(prisma.favorite, 'findMany', async ({ where }) => plots.filter(plot => matches({ userId: 'CUSTOMER', plot }, where)).map(plot => ({ plot })));
++  mock.method(prisma.trackingUpdate, 'findMany', async ({ where }) => records.filter(customer => matches({ customer }, where)).map(customer => ({ customerId: customer.id })));
++  mock.method(prisma.trackingUpdate, 'upsert', async ({ create }) => { mutations++; return create; });
++  mock.method(prisma.lead, 'create', async ({ data }) => { mutations++; return { id: 'new-lead', ...data }; });
++  const leadRows = () => plots.flatMap(plot => plot.leads.map(lead => ({ ...lead, plot, plotId: plot.id })));
++  mock.method(prisma.lead, 'findMany', async ({ where }) => leadRows().filter(row => matches(row, where)));
++  mock.method(prisma.lead, 'count', async ({ where }) => leadRows().filter(row => matches(row, where)).length);
++  mock.method(prisma.location, 'count', async ({ where }) => plots.filter(plot => matches({ ventures: [{ plots: [plot] }] }, where)).length);
++  mock.method(prisma.venture, 'update', async ({ where, data }) => { mutations++; return { id: where.id, ...data }; });
++  mock.method(prisma.ventureAsset, 'create', async ({ data }) => { mutations++; return data; });
++  mock.method(prisma.ventureAsset, 'findUnique', async () => ({ contentType: 'image/svg+xml', data: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>') }));
++  for (const action of ['update', 'delete']) mock.method(prisma.lead, action, async ({ where, data }) => {
++    const rows = plots.flatMap(plot => plot.leads.map(lead => ({ ...lead, plot, plotId: plot.id })));
++    const row = rows.find(r => matches(r, where)); if (!row) return absent(); mutations++; return { ...row, ...data };
++  });
++});
++afterEach(() => mock.restoreAll());
++async function api(path, role, method = 'GET', body) {
++  const response = await fetch(base + path, { method, headers: { ...(role ? { Authorization: `Bearer ${token(role)}` } : {}), 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
++  return { status: response.status, body: await response.json() };
++}
++test('structured ownership rejects suffixes and incidental notes', () => {
++  for (const notes of ['Email: notcustomer@example.test', 'Copied customer@example.test', 'Email: customer@example.test.extra', 'Email: customer@example.test someone', 'Email: customer@example.test\nEmail: other@example.test']) assert.equal(hasCustomerEmail(notes, 'customer@example.test'), false);
++  assert.equal(hasCustomerEmail('Other\r\nEmail: CUSTOMER@example.test\r\nMore', 'customer@example.test'), true);
++});
++test('scope helpers deny absent/unknown principals and preserve Agent scope', async () => {
++  await assert.rejects(() => plotAccessWhere(), e => e.statusCode === 401);
++  await assert.rejects(() => plotAccessWhere({ userId: 'x', role: 'OWNER' }), e => e.statusCode === 403);
++  assert.deepEqual(await plotAccessWhere(actor('AGENT')), {});
++  assert.deepEqual(await recordAccessWhere(actor('AGENT')), {});
++});
++test('anonymous callers cannot read protected resources', async () => {
++  for (const path of ['/plots', '/plots/own-plot', '/leads', '/total-data', '/tracking', '/favorites', '/stats', '/employee-access/employees']) assert.equal((await api(path)).status, 401, path);
++});
++test('customer plot details contain only own leads and foreign plots stay hidden', async () => {
++  const result = await api('/plots/own-plot', 'CUSTOMER');
++  assert.equal(result.status, 200); assert.deepEqual(result.body.data.leads.map(l => l.id), ['own-lead']);
++  assert.equal((await api('/plots/foreign-plot', 'CUSTOMER')).status, 404);
++  assert.deepEqual((await api('/plots', 'CUSTOMER')).body.data.map(p => p.id), ['own-plot']);
++});
++test('employee direct plot reads and writes honor assignments', async () => {
++  assert.equal((await api('/plots/foreign-plot', 'EMPLOYEE')).status, 404);
++  assert.equal((await api('/plots/foreign-plot', 'EMPLOYEE', 'PUT', { status: 'SOLD' })).status, 404);
++  assert.equal(mutations, 0);
++  assert.equal((await api('/plots/own-plot', 'EMPLOYEE', 'PUT', { status: 'SOLD' })).status, 200);
++  assert.equal(mutations, 1);
++});
++test('employee lead list and create/update/delete reject foreign plots', async () => {
++  const lead = { plotId: 'foreign-plot', customerName: 'New Customer', email: 'new@example.test', contactNumber: '12345678', location: 'Sample', uniqueId: 'TEST-1', pricePerSqYard: 100, agentId: 'ADMIN' };
++  assert.deepEqual((await api('/leads', 'EMPLOYEE')).body.data.map(row => row.id), ['own-lead', 'other-lead']);
++  assert.deepEqual((await api('/leads', 'CUSTOMER')).body.data.map(row => row.id), ['own-lead']);
++  assert.equal((await api('/leads', 'EMPLOYEE', 'POST', lead)).status, 404);
++  assert.equal((await api('/leads/foreign-lead', 'EMPLOYEE', 'PUT', { status: 'WON' })).status, 404);
++  assert.equal((await api('/leads/foreign-lead', 'EMPLOYEE', 'DELETE')).status, 404);
++  assert.equal(mutations, 0);
++  const created = await api('/leads', 'EMPLOYEE', 'POST', { ...lead, plotId: 'own-plot' });
++  assert.equal(created.status, 201); assert.equal(created.body.data.agentId, 'EMPLOYEE');
++  assert.equal((await api('/leads/own-lead', 'EMPLOYEE', 'PUT', { status: 'INVALID' })).status, 400);
++  assert.equal((await api('/leads/own-lead', 'EMPLOYEE', 'PUT', { status: 'WON' })).status, 200);
++  assert.equal((await api('/leads/own-lead', 'EMPLOYEE', 'DELETE')).status, 200);
++});
++test('assignment removal takes effect on the next read and mutation', async () => {
++  assert.equal((await api('/plots/own-plot', 'EMPLOYEE')).status, 200);
++  assignment.assignedVentureIds = [];
++  assert.equal((await api('/plots/own-plot', 'EMPLOYEE')).status, 404);
++  assert.deepEqual((await api('/plots', 'EMPLOYEE')).body.data, []);
++  assert.equal((await api('/plots/own-plot', 'EMPLOYEE', 'PUT', { status: 'SOLD' })).status, 404);
++  assert.equal(mutations, 0);
++});
++test('records and tracking use exact customer ownership and coherent pagination', async () => {
++  const result = await api('/total-data', 'CUSTOMER');
++  assert.equal(result.status, 200); assert.equal(result.body.pagination.total, 1);
++  assert.deepEqual(result.body.data.map(r => r.id), ['own-record']);
++  assert.deepEqual((await api('/tracking', 'CUSTOMER')).body.data.map(r => r.customerId), ['own-record']);
++});
++test('employee cannot take over or delete another employee record', async () => {
++  const data = { contactName: 'Test Person', contactNumber: '12345678', location: 'Sample', budget: '100', recordOwner: 'EMPLOYEE' };
++  assert.equal((await api('/total-data/foreign-record', 'EMPLOYEE', 'PUT', data)).status, 404);
++  assert.equal((await api('/total-data/foreign-record', 'EMPLOYEE', 'DELETE')).status, 404);
++  assert.equal(mutations, 0);
++  assert.equal((await api('/total-data/own-record', 'EMPLOYEE', 'PUT', data)).status, 200);
++});
++test('free-text notes cannot inject, transfer or erase customer ownership', async () => {
++  const data = { contactName: 'Test Person', contactNumber: '12345678', location: 'Sample', budget: '100', recordOwner: 'EMPLOYEE' };
++  const created = await api('/total-data', 'EMPLOYEE', 'POST', { ...data, notes: 'Normal notes\nEmail: customer@example.test' });
++  assert.equal(created.status, 201); assert.equal(created.body.data.notes, 'Normal notes');
++  assert.deepEqual((await api('/total-data', 'CUSTOMER')).body.data.map(row => row.id), ['own-record']);
++  users.OTHER_CUSTOMER = { id: 'OTHER_CUSTOMER', role: 'CUSTOMER', email: 'other@example.test', displayName: 'Other' };
++  const edited = await api('/total-data/own-record', 'EMPLOYEE', 'PUT', { ...data, notes: 'Email: other@example.test\nUpdated notes' });
++  assert.equal(edited.status, 200); assert.equal(edited.body.data.notes, 'Email: customer@example.test\nUpdated notes');
++  assert.equal((await api('/total-data', 'OTHER_CUSTOMER')).body.data.some(row => row.id === 'own-record'), false);
++  assert.equal((await api('/total-data', 'CUSTOMER')).body.data.find(row => row.id === 'own-record').notes, edited.body.data.notes);
++  const cleared = await api('/total-data/own-record', 'EMPLOYEE', 'PUT', { ...data, notes: '' });
++  assert.equal(cleared.status, 200); assert.equal(hasCustomerEmail(cleared.body.data.notes, 'customer@example.test'), true);
++});
++test('lead creation establishes its validated email linkage and ignores ownership text in notes', async () => {
++  const lead = { plotId: 'own-plot', customerName: 'New Customer', email: 'customer@example.test', contactNumber: '12345678', location: 'Sample', uniqueId: 'TEST-1', pricePerSqYard: 100, notes: 'Email: other@example.test\nDiscuss next week' };
++  assert.equal((await api('/leads', 'EMPLOYEE', 'POST', lead)).status, 201);
++  const record = records.find(row => row.id === 'new-record');
++  assert.equal(hasCustomerEmail(record.notes, 'customer@example.test'), true);
++  assert.equal(hasCustomerEmail(record.notes, 'other@example.test'), false);
++  assert.match(record.notes, /Discuss next week/);
++});
++test('duplicate employee aliases fail closed without losing exact email ownership', async () => {
++  users.AGENT.displayName = 'EMPLOYEE';
++  records.push({ id: 'ambiguous-record', recordOwner: 'EMPLOYEE' });
++  assert.deepEqual((await api('/total-data', 'EMPLOYEE')).body.data.map(row => row.id), ['own-record']);
++});
++test('customer statistics count only accessible plots, leads and records', async () => {
++  const response = await api('/stats', 'CUSTOMER');
++  assert.equal(response.status, 200);
++  assert.deepEqual({ locations: response.body.data.locations, plots: response.body.data.plots, customers: response.body.data.customers, leads: response.body.data.leads, employees: response.body.data.employees }, { locations: 1, plots: 1, customers: 1, leads: 1, employees: 0 });
++});
++test('customer favorites reject foreign IDs and filter inaccessible retained favorites', async () => {
++  assert.equal((await api('/favorites', 'CUSTOMER', 'POST', { plotId: 'foreign-plot' })).status, 404);
++  assert.equal(mutations, 0);
++  assert.equal((await api('/favorites', 'CUSTOMER', 'POST', { plotId: 'own-plot' })).status, 201);
++  assert.deepEqual((await api('/favorites', 'CUSTOMER')).body.data.map(f => f.plot.id), ['own-plot']);
++  plots[0].leads = plots[0].leads.filter(lead => lead.email !== 'customer@example.test');
++  assert.deepEqual((await api('/favorites', 'CUSTOMER')).body.data, []);
++});
++test('tracking writes enforce employee ownership and coordinate bounds', async () => {
++  const data = { customerId: 'foreign-record', latitude: 10, longitude: 20 };
++  assert.equal((await api('/tracking', 'EMPLOYEE', 'POST', data)).status, 404);
++  assert.equal((await api('/tracking', 'EMPLOYEE', 'POST', { ...data, latitude: 91 })).status, 400);
++  assert.equal((await api('/tracking', 'EMPLOYEE', 'POST', { ...data, customerId: 'own-record' })).status, 200);
++  assert.equal((await api('/tracking', 'AGENT', 'POST', data)).status, 200);
++});
++test('Customer and Agent never gain Employee mutation permissions', async () => {
++  for (const role of ['CUSTOMER', 'AGENT']) for (const [method, path] of [
++    ['PUT', '/plots/own-plot'], ['POST', '/leads'], ['DELETE', '/leads/own-lead'], ['POST', '/total-data'], ['DELETE', '/total-data/own-record'], ['POST', '/auth/customers']
++  ]) assert.equal((await api(path, role, method, {})).status, 403, `${role} ${path}`);
++  assert.equal((await api('/tracking', 'CUSTOMER', 'POST', {})).status, 403);
++  assert.equal(mutations, 0);
++});
++test('employee admin routes denied and staff editor cannot target another role', async () => {
++  assert.equal((await api('/employee-access/employees', 'EMPLOYEE')).status, 403);
++  assert.equal((await api('/ventures', 'EMPLOYEE', 'POST', {})).status, 403);
++  assert.equal((await api('/employee-access/employees/ADMIN', 'ADMIN', 'PUT', { displayName: 'Changed' })).status, 404);
++  assert.equal((await api('/employee-access/employees/CUSTOMER/status', 'ADMIN', 'POST', { status: 'FROZEN' })).status, 404);
++  assert.equal((await api('/employee-access/employees/AGENT', 'ADMIN', 'PUT', { displayName: 'Changed' })).status, 404);
++  assert.equal((await api('/employee-access/employees/EMPLOYEE', 'ADMIN', 'PUT', { dateOfBirth: 'nonsense' })).status, 400);
++  assert.equal((await api('/employee-access/employees/EMPLOYEE', 'ADMIN', 'PUT', { displayName: 'Changed' })).status, 200);
++  assert.equal((await api('/employee-access/employees/EMPLOYEE/status', 'ADMIN', 'POST', { status: 'FROZEN' })).status, 200);
++});
++test('employee email changes fail clearly while case-equivalent edits preserve ownership', async () => {
++  const changed = await api('/employee-access/employees/EMPLOYEE', 'ADMIN', 'PUT', { email: 'changed@example.test' });
++  assert.equal(changed.status, 400); assert.match(changed.body.message, /email is fixed/i); assert.equal(mutations, 0);
++  const unchanged = await api('/employee-access/employees/EMPLOYEE', 'ADMIN', 'PUT', { email: 'EMPLOYEE@example.test', displayName: 'Updated display' });
++  assert.equal(unchanged.status, 200); assert.equal(unchanged.body.data.email, 'employee@example.test');
++  assert.deepEqual((await api('/total-data', 'EMPLOYEE')).body.data.map(row => row.id), ['own-record']);
++});
++test('layout regions enforce normalized coordinates and bounded polygon shape', async () => {
++  const valid = { regions: { roads: [{ points: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }] }], parks: [] } };
++  assert.equal((await api('/ventures/assigned-venture/regions', 'ADMIN', 'PUT', { regions: 'invalid' })).status, 400);
++  const invalid = structuredClone(valid); invalid.regions.roads[0].points[0].x = 2;
++  assert.equal((await api('/ventures/assigned-venture/regions', 'ADMIN', 'PUT', invalid)).status, 400);
++  assert.equal(mutations, 0);
++  assert.equal((await api('/ventures/assigned-venture/regions', 'ADMIN', 'PUT', valid)).status, 200);
++});
++test('uploads validate bytes, enforce file limits and sandbox SVG delivery', async () => {
++  const upload = async (bytes, type, role = 'ADMIN') => {
++    const form = new FormData(); form.set('layout', new Blob([bytes], { type }), 'layout');
++    const response = await fetch(base + '/ventures/assigned-venture/layout', { method: 'POST', headers: { Authorization: `Bearer ${token(role)}` }, body: form });
++    await response.text(); return response.status;
++  };
++  assert.equal(await upload('not-a-png', 'image/png'), 400);
++  assert.equal(await upload('not-a-png', 'image/png', 'EMPLOYEE'), 403);
++  assert.equal(await upload(Buffer.alloc(4 * 1024 * 1024 + 1), 'image/png'), 413);
++  assert.equal(mutations, 0);
++  assert.equal(await upload('<svg xmlns="http://www.w3.org/2000/svg"/>', 'image/svg+xml'), 200);
++  const asset = await fetch(base.replace('/api', '') + '/uploads/assets/test');
++  assert.match(asset.headers.get('content-security-policy'), /sandbox/); await asset.text();
++});
++test('existing tokens recheck frozen status and current role', async () => {
++  const saved = token('EMPLOYEE'); users.EMPLOYEE.employeeProfile.status = 'FROZEN';
++  let response = await fetch(base + '/plots', { headers: { Authorization: `Bearer ${saved}` } });
++  assert.equal(response.status, 401); await response.text();
++  users.EMPLOYEE.employeeProfile.status = 'ACTIVE'; users.EMPLOYEE.role = 'CUSTOMER';
++  response = await fetch(base + '/plots/own-plot', { method: 'PUT', headers: { Authorization: `Bearer ${saved}`, 'Content-Type': 'application/json' }, body: '{"status":"SOLD"}' });
++  assert.equal(response.status, 403); await response.text();
++});
++test('non-admin realtime contains no record IDs, contacts or coordinates', () => {
++  const event = { id: 'event', type: 'tracking.updated', createdAt: '2026-01-01', origin: 'internal', payload: { customerId: 'private', email: 'private@example.test', latitude: 42 } };
++  for (const role of ['EMPLOYEE', 'AGENT', 'CUSTOMER']) assert.deepEqual(eventForRole(event, role), { id: 'event', type: event.type, createdAt: event.createdAt, payload: {} });
++  assert.equal(eventForRole(event, 'ADMIN').payload, event.payload);
++});
++test('SSE strips private payload and closes after session freeze', { timeout: 5000 }, async () => {
++  const abort = new AbortController();
++  const response = await fetch(base + '/stream', { headers: { Authorization: `Bearer ${token('EMPLOYEE')}`, Accept: 'text/event-stream' }, signal: abort.signal });
++  const reader = response.body.getReader(); await reader.read();
++  await publishEvent('customer.updated', { record: { email: 'private@example.test' } });
++  const chunk = new TextDecoder().decode((await reader.read()).value);
++  assert.match(chunk, /customer.updated/); assert.doesNotMatch(chunk, /private@example.test/);
++  users.EMPLOYEE.employeeProfile.status = 'FROZEN';
++  await publishEvent('customer.updated', { record: { email: 'private@example.test' } });
++  assert.equal((await reader.read()).done, true); abort.abort();
++});
++test('WebSocket strips private payload and closes after session freeze', { timeout: 5000 }, async () => {
++  const ws = new WebSocket(base.replace('http:', 'ws:') + '/ws', { headers: { Authorization: `Bearer ${token('EMPLOYEE')}` } });
++  await once(ws, 'message');
++  const delivered = once(ws, 'message');
++  await publishEvent('tracking.updated', { customerId: 'private-record', latitude: 42 });
++  const [data] = await delivered; const event = JSON.parse(data.toString());
++  assert.equal(event.type, 'tracking.updated'); assert.deepEqual(event.payload, {});
++  users.EMPLOYEE.employeeProfile.status = 'FROZEN';
++  const closed = once(ws, 'close'); await publishEvent('tracking.updated', { customerId: 'private-record' });
++  const [code] = await closed; assert.equal(code, 1008);
++});
+diff --git a/server/tests/mysql-authorization.test.cjs b/server/tests/mysql-authorization.test.cjs
+new file mode 100644
+index 0000000..3e8765e
+--- /dev/null
++++ b/server/tests/mysql-authorization.test.cjs
+@@ -0,0 +1,141 @@
++const { test, before, after } = require('node:test');
++const assert = require('node:assert/strict');
++const url = new URL(process.env.TEST_DATABASE_URL ?? 'mysql://invalid/');
++if (process.env.RUN_LOCAL_MYSQL_TESTS !== '1' || url.hostname !== '127.0.0.1' || url.port !== '3309' || !/^\/ventureplus_test_[a-z0-9_]+$/i.test(url.pathname)) {
++  throw new Error('Use the isolated test runner with a new ventureplus_test_* database on 127.0.0.1:3309.');
++}
++process.env.DATABASE_URL = url.toString();
++process.env.NODE_ENV = 'test';
++process.env.JWT_SECRET = 'isolated-mysql-test-signing-key-only';
++process.env.REALTIME_REDIS_URL = '';
++process.env.LOG_LEVEL = 'silent';
++const { PrismaClient } = require('@prisma/client');
++const prisma = new PrismaClient({ datasources: { db: { url: url.toString() } }, log: [] });
++const observer = new PrismaClient({ datasources: { db: { url: url.toString() } }, log: [] });
++// This is a real Prisma client, injected only to suppress query/error logging.
++const prismaModule = require.resolve('../dist/config/prisma.js');
++require.cache[prismaModule] = { id: prismaModule, filename: prismaModule, loaded: true, exports: { prisma } };
++const { createApp } = require('../dist/app.js');
++const { signAccessToken } = require('../dist/utils/tokens.js');
++let server, base;
++const identities = {
++  admin: ['ADMIN', 'admin@example.test'], employee: ['EMPLOYEE', 'employee@example.test'],
++  employee2: ['EMPLOYEE', 'employee2@example.test'], customer: ['CUSTOMER', 'customer@example.test'],
++  customer2: ['CUSTOMER', 'other@example.test'], agent: ['AGENT', 'agent@example.test']
++};
++const token = id => signAccessToken({ sub: id, role: identities[id][0], email: identities[id][1], displayName: id });
++async function api(path, identity, method = 'GET', body) {
++  const response = await fetch(base + path, { method, headers: { ...(identity ? { Authorization: `Bearer ${token(identity)}` } : {}), 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
++  return { status: response.status, body: await response.json() };
++}
++const recordBody = { contactName: 'Synthetic Customer', contactNumber: '0000000001', location: 'Fixture location', budget: '1000', recordOwner: 'employee@example.test' };
++before(async () => {
++  assert.equal(await prisma.user.count(), 0, 'Refuse any database containing existing users');
++  assert.equal(await prisma.plot.count(), 0, 'Refuse any database containing existing inventory');
++  for (const [id, [role, email]] of Object.entries(identities)) await prisma.user.create({ data: {
++    id, role, email, displayName: id, fullName: id, passwordHash: 'not-a-login-password',
++    ...(role === 'EMPLOYEE' ? { employeeProfile: { create: { status: 'ACTIVE' } } } : {})
++  } });
++  for (const scope of ['own', 'foreign']) {
++    await prisma.location.create({ data: { id: `location-${scope}`, name: `Fixture ${scope}` } });
++    await prisma.venture.create({ data: { id: `venture-${scope}`, name: `Venture ${scope}`, locationId: `location-${scope}` } });
++    await prisma.plot.create({ data: { id: `plot-${scope}`, plotNumber: `Plot ${scope}`, ventureId: `venture-${scope}`, status: 'AVAILABLE', area: 100, pricePerSqYard: 100 } });
++  }
++  await prisma.employeeAssignment.create({ data: { userId: 'employee', assignedLocationIds: [], assignedVentureIds: ['venture-own'] } });
++  await prisma.employeeAssignment.create({ data: { userId: 'employee2', assignedLocationIds: ['location-foreign'], assignedVentureIds: [] } });
++  for (const [id, email, plotId] of [['lead-own', identities.customer[1], 'plot-own'], ['lead-shared', identities.customer2[1], 'plot-own'], ['lead-foreign', identities.customer2[1], 'plot-foreign']]) await prisma.lead.create({ data: { id, email, plotId, customerName: id, contactNumber: '0000000002', location: 'Fixture', uniqueId: id, pricePerSqYard: 100 } });
++  await prisma.customerRecord.create({ data: { id: 'record-own', ...recordBody, leadName: 'employee@example.test', notes: 'Email: customer@example.test\nExisting notes' } });
++  await prisma.customerRecord.create({ data: { id: 'record-foreign', ...recordBody, recordOwner: 'employee2@example.test', leadName: 'employee2@example.test', notes: 'Email: other@example.test' } });
++  await prisma.customerRecord.create({ data: { id: 'record-suffix', ...recordBody, recordOwner: 'employee2@example.test', notes: 'Email: notcustomer@example.test' } });
++  await prisma.customerRecord.create({ data: { id: 'record-incidental', ...recordBody, recordOwner: 'employee2@example.test', notes: 'Ask customer@example.test about another account' } });
++  server = createApp().listen(0, '127.0.0.1'); await new Promise(resolve => server.once('listening', resolve));
++  base = `http://127.0.0.1:${server.address().port}/api`;
++});
++after(async () => {
++  if (server) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
++  await observer.$disconnect(); await prisma.$disconnect();
++});
++
++test('real relation filters isolate shared plot leads and exact legacy records', async () => {
++  const plot = await api('/plots/plot-own', 'customer'); assert.equal(plot.status, 200);
++  assert.deepEqual(plot.body.data.leads.map(row => row.id), ['lead-own']);
++  assert.equal((await api('/plots/plot-foreign', 'customer')).status, 404);
++  const records = await api('/total-data', 'customer'); assert.equal(records.body.pagination.total, 1);
++  assert.deepEqual(records.body.data.map(row => row.id), ['record-own']);
++  assert.deepEqual((await api('/plots', 'employee2')).body.data.map(row => row.id), ['plot-foreign']);
++});
++test('HTTP mutation persists and is visible to another authorized session and DB connection', async () => {
++  assert.equal((await api('/plots/plot-own', 'employee', 'PUT', { status: 'SOLD' })).status, 200);
++  assert.equal((await observer.plot.findUnique({ where: { id: 'plot-own' } })).status, 'SOLD');
++  assert.equal((await api('/plots/plot-own', 'customer')).body.data.status, 'SOLD');
++  assert.equal((await api('/plots/plot-own', 'admin')).body.data.status, 'SOLD');
++});
++test('anonymous, wrong-role and foreign direct mutations fail against MySQL', async () => {
++  assert.equal((await api('/plots')).status, 401);
++  assert.equal((await api('/plots/plot-own', 'agent', 'PUT', { status: 'ADVANCE' })).status, 403);
++  assert.equal((await api('/plots/plot-foreign', 'employee', 'PUT', { status: 'SOLD' })).status, 404);
++  assert.equal((await api('/leads/lead-foreign', 'employee', 'PUT', { status: 'WON' })).status, 404);
++  assert.equal((await api('/leads/lead-foreign', 'employee', 'DELETE')).status, 404);
++  assert.equal((await api('/total-data/record-foreign', 'employee', 'PUT', recordBody)).status, 404);
++  assert.equal((await api('/total-data/record-foreign', 'employee', 'DELETE')).status, 404);
++  assert.equal((await observer.plot.findUnique({ where: { id: 'plot-foreign' } })).status, 'AVAILABLE');
++  assert.equal((await observer.customerRecord.findUnique({ where: { id: 'record-foreign' } })).recordOwner, 'employee2@example.test');
++});
++test('record creation and edits persist without free-text ownership injection', async () => {
++  const created = await api('/total-data', 'employee', 'POST', { ...recordBody, contactName: 'Created fixture', notes: 'Email: other@example.test\nOrdinary notes' });
++  assert.equal(created.status, 201); assert.equal(created.body.data.notes, 'Ordinary notes');
++  assert.equal((await observer.customerRecord.findUnique({ where: { id: created.body.data.id } })).recordOwner, 'employee@example.test');
++  const edited = await api('/total-data/record-own', 'employee', 'PUT', { ...recordBody, notes: 'Email: other@example.test\nUpdated through HTTP' });
++  assert.equal(edited.status, 200); assert.equal(edited.body.data.notes, 'Email: customer@example.test\nUpdated through HTTP');
++  assert.equal((await api('/total-data', 'customer')).body.data.find(row => row.id === 'record-own').notes, edited.body.data.notes);
++  assert.equal((await api('/total-data', 'customer2')).body.data.some(row => row.id === 'record-own'), false);
++});
++test('lead creation transaction writes trusted ownership and supports scoped update/delete', async () => {
++  const body = { plotId: 'plot-own', customerName: 'New lead fixture', email: 'customer@example.test', contactNumber: '0000000003', location: 'Fixture', uniqueId: 'created-lead-unique', pricePerSqYard: 300, agentId: 'admin', notes: 'Email: other@example.test\nFollow up' };
++  assert.equal((await api('/leads', 'employee', 'POST', { ...body, plotId: 'plot-foreign' })).status, 404);
++  const created = await api('/leads', 'employee', 'POST', body); assert.equal(created.status, 201);
++  assert.equal(created.body.data.agentId, 'employee');
++  const saved = await observer.customerRecord.findFirst({ where: { contactName: body.customerName } });
++  assert.match(saved.notes, /Email: customer@example.test/); assert.doesNotMatch(saved.notes, /other@example.test/);
++  assert.equal((await api(`/leads/${created.body.data.id}`, 'employee', 'PUT', { status: 'WON' })).status, 200);
++  assert.equal((await observer.lead.findUnique({ where: { id: created.body.data.id } })).status, 'WON');
++  assert.equal((await api(`/leads/${created.body.data.id}`, 'employee', 'DELETE')).status, 200);
++  assert.equal(await observer.lead.findUnique({ where: { id: created.body.data.id } }), null);
++});
++test('tracking ownership and coordinate validation persist through relation filters', async () => {
++  const coordinates = { customerId: 'record-own', latitude: 10.5, longitude: 20.5, status: 'ACTIVE' };
++  assert.equal((await api('/tracking', 'employee', 'POST', { ...coordinates, latitude: 91 })).status, 400);
++  assert.equal((await api('/tracking', 'employee', 'POST', { ...coordinates, customerId: 'record-foreign' })).status, 404);
++  assert.equal((await api('/tracking', 'employee', 'POST', coordinates)).status, 200);
++  assert.equal((await observer.trackingUpdate.findUnique({ where: { customerId: 'record-own' } })).latitude, 10.5);
++  assert.deepEqual((await api('/tracking', 'customer')).body.data.map(row => row.customerId), ['record-own']);
++  assert.deepEqual((await api('/tracking', 'customer2')).body.data, []);
++});
++test('staff editor rejects other roles and address transfers while freeze invalidates saved tokens', async () => {
++  assert.equal((await api('/employee-access/employees/admin', 'admin', 'PUT', { displayName: 'Blocked' })).status, 404);
++  assert.equal((await api('/employee-access/employees/employee', 'admin', 'PUT', { email: 'replacement@example.test' })).status, 400);
++  assert.equal((await api('/employee-access/employees/employee', 'admin', 'PUT', { email: 'EMPLOYEE@example.test' })).status, 200);
++  assert.equal((await observer.user.findUnique({ where: { id: 'employee' } })).email, 'employee@example.test');
++  assert.equal((await api('/employee-access/employees/employee/status', 'admin', 'POST', { status: 'FROZEN' })).status, 200);
++  assert.equal((await api('/plots', 'employee')).status, 401);
++  assert.equal((await api('/employee-access/employees/employee/status', 'admin', 'POST', { status: 'ACTIVE' })).status, 200);
++});
++test('asset upload persists bytes and a second request retrieves the same asset', async () => {
++  const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jQWQAAAAASUVORK5CYII=', 'base64');
++  const form = new FormData(); form.set('layout', new Blob([bytes], { type: 'image/png' }), 'fixture.png');
++  const response = await fetch(base + '/ventures/venture-own/layout', { method: 'POST', headers: { Authorization: `Bearer ${token('admin')}` }, body: form });
++  assert.equal(response.status, 200); const body = await response.json();
++  const assetId = body.data.layoutImage.split('/').at(-1);
++  const saved = await observer.ventureAsset.findUnique({ where: { id: assetId } }); assert.deepEqual(Buffer.from(saved.data), bytes);
++  const read = await fetch(base.replace('/api', '') + body.data.layoutImage); assert.equal(read.status, 200); assert.deepEqual(Buffer.from(await read.arrayBuffer()), bytes);
++});
++test('retained favorites disappear when actual database visibility is removed', async () => {
++  assert.equal((await api('/favorites', 'customer', 'POST', { plotId: 'plot-foreign' })).status, 404);
++  assert.equal((await api('/favorites', 'customer', 'POST', { plotId: 'plot-own' })).status, 201);
++  assert.equal((await observer.favorite.count({ where: { userId: 'customer' } })), 1);
++  await prisma.lead.deleteMany({ where: { email: identities.customer[1], plotId: 'plot-own' } });
++  assert.deepEqual((await api('/favorites', 'customer')).body.data, []);
++  assert.equal((await api('/plots/plot-own', 'customer')).status, 404);
++  await prisma.employeeAssignment.update({ where: { userId: 'employee' }, data: { assignedVentureIds: [] } });
++  assert.equal((await api('/plots/plot-own', 'employee', 'PUT', { status: 'AVAILABLE' })).status, 404);
++});
