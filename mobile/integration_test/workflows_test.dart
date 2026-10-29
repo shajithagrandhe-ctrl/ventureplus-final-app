@@ -22,11 +22,24 @@ void main() {
     final field = find.byKey(ValueKey(key));
     await tester.ensureVisible(field);
     await tester.pumpAndSettle();
+    // Let the real IME finish reconnecting before injecting replacement text.
+    await tester.showKeyboard(field);
+    await tester.pumpAndSettle();
     await tester.enterText(field, value);
     await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextFormField>(field).controller!.text,
+      value,
+      reason: 'Native text entry for $key must reach its controller.',
+    );
     // Dismiss the native keyboard so the next action remains reachable.
     FocusManager.instance.primaryFocus?.unfocus();
     await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextFormField>(field).controller!.text,
+      value,
+      reason: 'Dismissing the keyboard must preserve $key.',
+    );
   }
 
   Future<AppController> open(
@@ -136,6 +149,12 @@ void main() {
   testWidgets(
     'native agent inquiry is validated and persisted locally without staff writes',
     (tester) async {
+      // Use Flutter's text-input test binding for this multiline replacement.
+      // With the real IME attached, its old composing state races enterText.
+      // UI validation, buttons and platform-backed persistence remain real;
+      // this test does not claim to verify physical-keyboard composition.
+      tester.testTextInput.register();
+      addTearDown(tester.testTextInput.unregister);
       final app = await AppController.create();
       expect(await app.enterOffline(Role.agent), true, reason: app.error);
       addTearDown(app.dispose);
@@ -164,10 +183,22 @@ void main() {
       const message =
           'Native offline inquiry validation and persistence check.';
       await fill(tester, 'message', message);
-      await tap(tester, find.text('Save inquiry locally'));
+      final submit = find.text('Save inquiry locally');
+      await tester.ensureVisible(submit);
+      await tester.pumpAndSettle();
+      await tester.tap(submit);
+      final feedback = find.text('Inquiry saved locally. It was not sent.');
+      final deadline = DateTime.now().add(const Duration(seconds: 15));
+      while (feedback.evaluate().isEmpty && DateTime.now().isBefore(deadline)) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
       expect(
-        find.text('Inquiry saved locally. It was not sent.'),
+        feedback,
         findsOneWidget,
+        reason: tester
+            .widgetList<Text>(find.byType(Text))
+            .map((text) => text.data)
+            .join(' | '),
       );
       final restored = await AppController.create();
       expect(await restored.restore(), true, reason: restored.error);

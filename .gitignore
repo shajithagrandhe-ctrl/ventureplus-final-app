@@ -14,3 +14,4 @@ reference-web/
 **/key.properties
 *.jks
 *.keystore
+artifacts/*.apk

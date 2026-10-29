@@ -50,6 +50,16 @@ abstract final class Brand {
     );
     return base.copyWith(
       scaffoldBackgroundColor: background,
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: {
+          TargetPlatform.android: MotionAwareTransitions(),
+          TargetPlatform.iOS: MotionAwareTransitions(),
+          TargetPlatform.macOS: MotionAwareTransitions(),
+          TargetPlatform.windows: MotionAwareTransitions(),
+          TargetPlatform.linux: MotionAwareTransitions(),
+          TargetPlatform.fuchsia: MotionAwareTransitions(),
+        },
+      ),
       visualDensity: VisualDensity.standard,
       materialTapTargetSize: MaterialTapTargetSize.padded,
       textTheme: base.textTheme.copyWith(
@@ -139,5 +149,21 @@ abstract final class Brand {
         backgroundColor: sage900,
       ),
     );
+  }
+}
+
+class MotionAwareTransitions extends PageTransitionsBuilder {
+  const MotionAwareTransitions();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    if (MediaQuery.disableAnimationsOf(context)) return child;
+    return FadeTransition(opacity: animation, child: child);
   }
 }

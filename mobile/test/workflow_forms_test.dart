@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,6 +12,7 @@ import 'package:ventureplus/features/workflows/layout_image.dart';
 import 'package:ventureplus/features/workflows/resource_forms.dart';
 import 'package:ventureplus/features/workflows/workflow_exports.dart';
 import 'package:ventureplus/features/workflows/workflow_page.dart';
+import 'package:ventureplus/ui/theme.dart';
 
 import 'core_data_test.dart' show FakeTransport;
 
@@ -317,6 +319,74 @@ void main() {
     addTearDown(controller.dispose);
     return controller;
   }
+
+  testWidgets(
+    'agent inquiry accepts corrected message after validation failure',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final app = await offline(Role.agent);
+      final plot = await app.repository!.detail(Resource.plots, 'demo-plot-3');
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: Brand.theme,
+          home: RecordDetailPage(
+            controller: app,
+            resource: Resource.plots,
+            record: plot,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      Future<void> tap(Finder target) async {
+        await tester.ensureVisible(target);
+        await tester.pumpAndSettle();
+        await tester.tap(target);
+        await tester.pumpAndSettle();
+      }
+
+      Future<void> fillMessage(String text) async {
+        final field = find.byKey(const ValueKey('message'));
+        await tester.ensureVisible(field);
+        await tester.pumpAndSettle();
+        await tester.enterText(field, text);
+        await tester.pumpAndSettle();
+        FocusManager.instance.primaryFocus?.unfocus();
+        await tester.pumpAndSettle();
+        expect(tester.widget<TextFormField>(field).controller!.text, text);
+        expect(tester.state<FormFieldState<String>>(field).value, text);
+      }
+
+      await tap(find.text('Make an inquiry'));
+      await fillMessage('Short');
+      await tap(find.text('Save inquiry locally'));
+      expect(find.text('Use at least 10 characters.'), findsOneWidget);
+      expect(
+        find.text('Check the highlighted fields before saving.'),
+        findsOneWidget,
+      );
+      const message =
+          'Native offline inquiry validation and persistence check.';
+      await fillMessage(message);
+      await tap(find.text('Save inquiry locally'));
+      expect(find.byType(RecordFormPage), findsNothing);
+      expect(
+        find.text('Inquiry saved locally. It was not sent.'),
+        findsOneWidget,
+      );
+      final data = jsonObject(
+        jsonDecode((await app.preferences.read(OfflineRepository.storageKey))!),
+      );
+      final inquiries = jsonList(data['inquiries']);
+      expect(inquiries, hasLength(1));
+      expect(inquiries.single['message'], message);
+      expect(inquiries.single['customerEmail'], app.user!.email);
+      expect((app.transport as FakeTransport).calls, isEmpty);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets(
     'customer plot permits favorites and inquiry but hides staff writes',
