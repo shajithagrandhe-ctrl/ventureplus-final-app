@@ -4,6 +4,58 @@
 **Website:** https://ventureplus123.vercel.app/  
 **Repository:** https://github.com/VenkataVyshnaviMondi/ventureplus123
 
+## Verified audit checkpoint — 29 October 2026
+
+Implementation destination: `shajithagrandhe-ctrl/ventureplus-final-app`. Reference
+source pinned to `3c24df131699c71fac4e500f0e1c531eeab519d2`. The complete
+screen/action/API/field/validation/ownership matrix, source line references, state
+requirements and test cases are in [docs/SOURCE-AUDIT.md](docs/SOURCE-AUDIT.md).
+The corrections below take precedence over the initial inventory later in this file.
+
+| Capability | Admin | Employee | Agent | Customer | Evidence |
+|---|---|---|---|---|---|
+| Locations / ventures / plots | All | Assigned inventory | Read | Own lead-linked plots | VERIFIED-SOURCE: inventory services |
+| Venture creation / layout / image uploads / coordinates | Yes | No | No | No | VERIFIED-SOURCE: venture and plot routes |
+| Plot status/details; lead create/update/delete | Yes | Yes, assignment checks need repair | No | No | VERIFIED-SOURCE: plot/lead routes |
+| Customer records | All, CRUD | Own records; write ownership gaps | Read | Own only; matching needs repair | VERIFIED-SOURCE: customer service |
+| Tracking | Read/write | Read/write, scope checks need repair | Read/write | Own, read-only | VERIFIED-SOURCE: tracking routes/service |
+| Staff access and assignments | Manage | No | No | No | VERIFIED-SOURCE: employee-access routes |
+| Customer provisioning | Yes | Yes | No | No | VERIFIED-SOURCE: auth routes |
+| Favorites | Own | Own | Own | Own; plot visibility gap | VERIFIED-SOURCE: favorite service |
+| Inquiries | Submit | Submit | Submit | Submit | VERIFIED-SOURCE: POST only, no management endpoint |
+| Identity / password / logout | Own | Own | Own | Own | VERIFIED-SOURCE: auth routes |
+
+Authentication verification: the exact three supplied demo pairs each returned
+HTTP 200 from login and HTTP 200 from `/auth/me`, with ADMIN, EMPLOYEE and CUSTOMER
+respectively. VERIFIED-LIVE, after explicit user approval in this chat. No Agent
+credentials were supplied or tested. The Admin dashboard and navigation were
+observed in the browser. Other role screens and business mutations are not yet
+live-audited; a successful login does not verify them.
+
+Binding discrepancies:
+- Login JSON contains no token: native clients must manage access/CSRF cookies,
+  bootstrap CSRF before login and refresh identity from `/auth/me`.
+- Agent is active in the backend but rejected by the existing web login's role
+  picker. Preserve Agent as distinct; do not grant employee mutation permissions.
+- Customer catalogue is **My Properties**, not public inventory. Sign-in remains
+  required. Never copy employee sidebar links that point to admin-only endpoints.
+- Separate photo/layout persistence is not supported: both uploads currently
+  overwrite `layoutImage`. Separate storage needs a compatible backend change.
+- No generic document store, inquiry management, standalone location CRUD,
+  venture delete, or plot create/delete API was found. Do not invent these actions.
+- Connected tracking must never use the web's simulated coordinates/random motion;
+  reports must not copy hardcoded interaction counts or conversion probabilities.
+- Customer/employee ownership and realtime payload isolation have source-proven
+  defects. Connected security acceptance remains blocked until repaired and tested.
+
+Tool baseline: Flutter 3.47.8 / Dart 3.13.7 found and initialized. No Android SDK or
+device is available. Backend TypeScript build passes; four existing migration
+conversion tests pass. Existing web build/tests are blocked by SWC native cache
+permissions. Root dependency audit reports 15 findings (4 critical, 3 high,
+7 moderate, 1 low); separate gateway install reports 8 findings. No database
+migration, seeding, credential change, push, deployment or live business mutation
+has been performed.
+
 ## 1. Product goal
 
 Build a native-feeling Flutter/Dart mobile application for Android first and iOS second, based on the existing VenturePlus / EstateHub real-estate website. Preserve the website's identity and business workflows while redesigning desktop-oriented interactions for mobile. Do not use a WebView as the app.

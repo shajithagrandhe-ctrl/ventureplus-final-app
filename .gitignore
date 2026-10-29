@@ -1,0 +1,16 @@
+reference-web/
+.local/
+.npm-cache/
+.impeccable/
+.taste-skill/
+**/.env
+**/.env.*
+!**/.env.example
+**/node_modules/
+**/build/
+**/.dart_tool/
+**/.flutter-plugins-dependencies
+**/local.properties
+**/key.properties
+*.jks
+*.keystore
