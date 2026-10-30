@@ -153,6 +153,14 @@ class _LoginPageState extends State<LoginPage> {
                             ? 'Enter a password with at least 6 characters.'
                             : null,
                       ),
+                      if (widget.controller.sessionNotice != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: Brand.gap),
+                          child: Semantics(
+                            liveRegion: true,
+                            child: Text(widget.controller.sessionNotice!),
+                          ),
+                        ),
                       if (widget.controller.error != null)
                         Padding(
                           padding: const EdgeInsets.only(top: Brand.gap),

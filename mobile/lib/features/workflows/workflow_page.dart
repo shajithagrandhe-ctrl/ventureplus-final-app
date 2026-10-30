@@ -413,13 +413,17 @@ class _WorkflowPageState extends State<WorkflowPage> {
                           actionLabel: 'Refresh',
                         )
                       else ...[
-                        TextField(
-                          controller: _searchController,
-                          decoration: const InputDecoration(
-                            labelText: 'Search this list',
-                            prefixIcon: Icon(Icons.search),
+                        Semantics(
+                          container: true,
+                          child: TextField(
+                            controller: _searchController,
+                            decoration: const InputDecoration(
+                              labelText: 'Search this list',
+                              prefixIcon: Icon(Icons.search),
+                            ),
+                            onChanged: (value) =>
+                                setState(() => _search = value),
                           ),
-                          onChanged: (value) => setState(() => _search = value),
                         ),
                         if (filters.isNotEmpty) ...[
                           const SizedBox(height: Brand.compact),

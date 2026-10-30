@@ -1,28 +1,56 @@
-# Local backend repair patch
+# VenturePlus backend repair and verification patch
 
-`ventureplus-authorization.patch` contains the reviewed local backend changes and their regression tests. It targets source revision `3c24df131699c71fac4e500f0e1c531eeab519d2` in the existing VenturePlus web/backend repository. The Flutter repository does not own or deploy that backend.
+`ventureplus-authorization.patch` targets source revision `3c24df131699c71fac4e500f0e1c531eeab519d2` of the existing web/backend source. It contains the authorization repairs, durable session revocation and additive SQL migration, patched dependency lockfiles, backend ESLint configuration, regression tests and narrow web type-check fixes. The Flutter repository does not deploy that backend automatically.
 
-The source copy under `reference-web/` is ignored by the Flutter repository. This patch preserves its changes as a deliverable. No source commit, push, production migration, repository seed or deployment was performed. A fresh local synthetic MySQL database was created for the separate integration suite.
+The local source copy in `reference-web/` is ignored. This exported patch preserves its changes as a deliverable. No backend source commit/push, production migration, repository seed or deployment was performed. Only fresh local synthetic MySQL databases were created for verification.
 
-In a clean checkout of the matching source revision, review and apply:
+## Apply and verify locally
+
+Use Node 24. In a clean checkout of the matching source revision:
 
 ```powershell
 git apply --check C:\path\to\ventureplus-authorization.patch
 git apply C:\path\to\ventureplus-authorization.patch
-node node_modules/typescript/bin/tsc -p server/tsconfig.json
-node --test server/tests/authorization.test.cjs server/tests/mongo-mysql-record.test.mjs
+npm ci
+npm ci --prefix backend
+npm run lint:backend
+npm run typecheck -w client
+npm test
+npm run build
 ```
 
-The build requires the repository's installed dependencies and generated Prisma client. Use its existing installation/generation instructions if missing. The new authorization test suite injects persistence before loading the app, binds only to loopback, disables Redis and uses synthetic identities. It does not create a Prisma client or connect to MySQL. Run the separate database integration suite against an explicitly approved isolated MySQL instance before deployment; these tests are not a substitute.
+On this Windows host, set the existing private SWC cache before web build/test commands:
 
-The separate real-MySQL suite passed 9/9 locally. On Windows, with the official MySQL ZIP extracted under `.local/mysql/mysql-8.4.13-winx64`, reproduce it from the Flutter workspace with:
+```powershell
+$env:SWC_NATIVE_BINDING_CACHE='C:\VenturePlus-SWC-01a1875c'
+```
+
+That path is specific to this machine. Other machines should use their normal safe SWC cache. It does not belong in the deployed application configuration.
+
+The root test command runs 2 client tests, 36 server tests without a database, and 3 gateway HTTP tests. Server tests inject synthetic persistence before loading the app; they bind only to loopback and do not connect to MySQL. The real-persistence suite is separate. Backend lint and client type checking pass; existing full client lint still reports 66 errors and 30 warnings. The production build passes with its existing large-chunk warning. The final registration regression ensures that an administrator password reset committed before session issuance prevents stale credentials from creating a session.
+
+## Separate isolated MySQL suite
+
+With the official MySQL 8.4.13 Windows ZIP extracted under `.local/mysql/mysql-8.4.13-winx64`, run this from the Flutter workspace:
 
 ```powershell
 .\backend-patches\run-isolated-mysql.ps1
 ```
 
-Use `-MySqlHome C:\path\to\mysql` for another extracted location. The runner refuses occupied port 3309, initializes a new datadir, creates a unique `ventureplus_test_*` database, applies the existing Prisma schema only there and runs `server/tests/mysql-authorization.test.cjs` using real persistence. It stops only its own server afterward. The test module rejects arbitrary hosts, ports, database names and nonempty fixture databases. This does not operate on the deployed backend. The fixture uses a local-only empty-password root account inside the disposable server; never use this setup for a shared or production database.
+Use `-MySqlHome C:\path\to\mysql` for another extracted location. The runner refuses an occupied port 3309, initializes a fresh datadir, creates a unique `ventureplus_test_*` database, applies both SQL migrations only there and runs `server/tests/mysql-authorization.test.cjs` with real Prisma persistence. It stops only its own server. The tests reject arbitrary hosts, ports, database names and preexisting fixture users/inventory. The final run passed 14/14. The disposable loopback-only server uses an empty-password local root; never use this configuration for shared or production databases.
 
-To regenerate from the current local source edits, run `node backend-patches/export-local-patch.mjs` from the Flutter workspace. The exporter checks the baseline, reverse-checks the result, and checks forward application to a disposable archive of the clean baseline without staging or committing source files.
+MySQL provenance: [official MySQL 8.4 downloads](https://dev.mysql.com/downloads/mysql/8.4.html?os=3), Windows 8.4.13 ZIP, official MD5 `7b94489d5524dea9b27097068bea25a8` verified when downloaded.
 
-See `docs/BACKEND-REPAIRS.md` for exact behavior, evidence and remaining limitations.
+## Review before any rollout
+
+The AuthSession migration changes session persistence. Existing stateless JWTs require one-time sign-in after deployment; password changes require sign-in again. Do not deploy the new authentication code before the table exists. Review `DEPLOYMENT-PACKET.md` for the exact additive migration, production-baseline preflight and actions requiring approval. No production schema operation is authorized by running these local tests.
+
+`FINISHING-REPORT.md` records the exact remedies, evidence and residual limitations. `verification/` contains build/test output. The four `audit-after-*.json` files each report zero known npm vulnerabilities as checked on 30 October 2026. Audit results are a registry snapshot, not a claim that every security issue is absent.
+
+To regenerate the complete allowlisted patch from the local source edits, run:
+
+```powershell
+node backend-patches/export-local-patch.mjs
+```
+
+The exporter verifies the source baseline, reverse-checks the result and forward-checks it against a disposable clean archive. It does not stage, commit, push or deploy source files. Its allowlist includes server/database repairs, the gateway, package manifests/lockfiles and the limited client compatibility changes.

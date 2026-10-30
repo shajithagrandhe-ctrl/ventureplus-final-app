@@ -20,7 +20,15 @@ export '../data/offline_repository.dart';
 export '../data/storage.dart';
 
 class AppController extends ChangeNotifier {
-  AppController({required this.transport, required this.preferences});
+  AppController({required this.transport, required this.preferences}) {
+    final api = transport;
+    if (api is DioApiTransport) {
+      api.onSessionWarning = (message) {
+        sessionWarning = message;
+        _notify();
+      };
+    }
+  }
   final ApiTransport transport;
   final KeyValueStore preferences;
   static const modeKey = 'ventureplus.mode';
@@ -44,8 +52,12 @@ class AppController extends ChangeNotifier {
   UserIdentity? user;
   SessionMode? mode;
   VentureRepository? repository;
-  bool busy = false;
+  bool _working = false;
+  bool _clearingSession = false;
+  bool get busy => _working || _clearingSession;
   String? error;
+  String? sessionWarning;
+  String? sessionNotice;
   bool _disposed = false;
   bool get isOffline => mode == SessionMode.offlineDemo;
 
@@ -55,6 +67,7 @@ class AppController extends ChangeNotifier {
 
   void clearError() {
     error = null;
+    sessionNotice = null;
     _notify();
   }
 
@@ -64,8 +77,9 @@ class AppController extends ChangeNotifier {
 
   Future<bool> _action(Future<void> Function() work) async {
     if (busy) return false;
-    busy = true;
+    _working = true;
     error = null;
+    sessionNotice = null;
     _notify();
     try {
       await work();
@@ -74,7 +88,7 @@ class AppController extends ChangeNotifier {
       error = _message(failure);
       return false;
     } finally {
-      busy = false;
+      _working = false;
       _notify();
     }
   }
@@ -87,14 +101,19 @@ class AppController extends ChangeNotifier {
 
   void _expired() {
     if (mode != SessionMode.connected) return;
+    _clearingSession = true;
     _clearIdentity();
     error = 'Your session expired. Please sign in again.';
     _notify();
     unawaited(
-      _clearSavedSession().catchError((Object failure) {
-        error = 'Your session expired. Saved session cleanup failed; try signing out again.';
-        _notify();
-      }),
+      _clearSavedSession()
+          .catchError((Object failure) {
+            error = 'Your session expired. Saved session cleanup failed; please sign in again.';
+          })
+          .whenComplete(() {
+            _clearingSession = false;
+            _notify();
+          }),
     );
   }
 
@@ -201,9 +220,29 @@ class AppController extends ChangeNotifier {
     }
   });
 
+  /// The server has already changed the password and revoked its sessions.
+  /// Local cleanup failures must never invite retrying the password mutation.
+  Future<void> passwordChanged() async {
+    _clearingSession = true;
+    _clearIdentity();
+    error = null;
+    sessionNotice = 'Password updated. Sign in again with your new password.';
+    _notify();
+    try {
+      await _clearSavedSession();
+    } on Object {
+      error = 'The password was updated, but saved session cleanup failed on this device. Please sign in again.';
+    } finally {
+      _clearingSession = false;
+      _notify();
+    }
+  }
+
   @override
   void dispose() {
     _disposed = true;
+    final api = transport;
+    if (api is DioApiTransport) api.onSessionWarning = null;
     super.dispose();
   }
 }

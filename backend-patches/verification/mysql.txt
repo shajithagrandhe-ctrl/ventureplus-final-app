@@ -1,0 +1,41 @@
+Isolated fixture run: 20261030_084707_465017b6; loopback port 3309; fresh database ventureplus_test_20261030_084707_465017b6
+Prisma schema loaded from database\schema.prisma
+Datasource "db": MySQL database "ventureplus_test_20261030_084707_465017b6" at "127.0.0.1:3309"
+
+2 migrations found in prisma/migrations
+
+Applying migration `20261013000000_mysql_baseline`
+Applying migration `20261029000000_auth_sessions`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20261013000000_mysql_baseline/
+    └─ migration.sql
+  └─ 20261029000000_auth_sessions/
+    └─ migration.sql
+
+All migrations have been successfully applied.
+✔ real relation filters isolate shared plot leads and exact legacy records (999.6487ms)
+✔ HTTP mutation persists and is visible to another authorized session and DB connection (45.4808ms)
+✔ anonymous, wrong-role and foreign direct mutations fail against MySQL (58.7081ms)
+✔ record creation and edits persist without free-text ownership injection (44.6274ms)
+✔ lead creation transaction writes trusted ownership and supports scoped update/delete (55.2811ms)
+✔ tracking ownership and coordinate validation persist through relation filters (58.0408ms)
+✔ staff editor rejects other roles and address transfers while freeze invalidates saved tokens (216.8588ms)
+✔ asset upload persists bytes and a second request retrieves the same asset (42.1244ms)
+✔ retained favorites disappear when actual database visibility is removed (82.9079ms)
+✔ HTTP login persists a digest-only session and logout rejects a copied token across DB connections (1171.9048ms)
+✔ password change revokes every existing session atomically and old credentials stop working (2609.9904ms)
+✔ admin password reset revokes employee sessions and nullable profile JSON remains valid (1061.2861ms)
+✔ HTTP registration persists a working session for the new employee (322.4419ms)
+✔ an admin reset between registration account creation and session issuance wins (1846.8368ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 10465.4766
+Isolated MySQL integration tests passed.

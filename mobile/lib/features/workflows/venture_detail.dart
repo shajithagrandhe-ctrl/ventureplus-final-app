@@ -12,6 +12,7 @@ import 'forms.dart';
 import 'workflow_page.dart';
 import 'layout_canvas.dart';
 import 'layout_editor.dart';
+import 'photo_recovery.dart';
 
 class VentureDetailPage extends StatefulWidget {
   const VentureDetailPage({
@@ -19,10 +20,14 @@ class VentureDetailPage extends StatefulWidget {
     required this.controller,
     required this.ventureId,
     this.initial = const {},
+    this.recoveredPhoto,
+    this.recovery,
   });
   final AppController controller;
   final String ventureId;
   final JsonMap initial;
+  final RecoveredPhoto? recoveredPhoto;
+  final PhotoRecovery? recovery;
   @override
   State<VentureDetailPage> createState() => _VentureDetailPageState();
 }
@@ -30,11 +35,15 @@ class VentureDetailPage extends StatefulWidget {
 class _VentureDetailPageState extends State<VentureDetailPage> {
   late JsonMap _venture;
   List<JsonMap> _plots = [];
-  bool _loading = true, _uploading = false;
+  bool _loading = true, _uploading = false, _picking = false;
   String? _error, _uploadError, _filename, _mime;
   List<int>? _bytes;
   bool _layout = true;
   double? _progress;
+  late final PhotoRecovery _recovery =
+      widget.recovery ?? PhotoRecovery(widget.controller);
+  PhotoIntent? _selectionIntent;
+  bool _recoveredHandled = false, _recoveredSelection = false;
   @override
   void initState() {
     super.initState();
@@ -62,6 +71,21 @@ class _VentureDetailPageState extends State<VentureDetailPage> {
           _venture = venture;
           _plots = plots;
         });
+        if (!_recoveredHandled && widget.recoveredPhoto != null) {
+          _recoveredHandled = true;
+          try {
+            final photo = widget.recoveredPhoto!;
+            final bytes = await _recovery.readRecovered(
+              photo,
+              widget.ventureId,
+            );
+            if (mounted) {
+              _setSelection(bytes, photo.name, photo.intent, recovered: true);
+            }
+          } catch (error) {
+            if (mounted) showFeedback(context, failureMessage(error));
+          }
+        }
       }
     } catch (error) {
       if (mounted) setState(() => _error = failureMessage(error));
@@ -71,6 +95,18 @@ class _VentureDetailPageState extends State<VentureDetailPage> {
   }
 
   Future<void> _chooseUpload(bool layout) async {
+    if (_picking || _uploading || widget.controller.user?.role != Role.admin) {
+      return;
+    }
+    setState(() => _picking = true);
+    try {
+      await _pickUpload(layout);
+    } finally {
+      if (mounted) setState(() => _picking = false);
+    }
+  }
+
+  Future<void> _pickUpload(bool layout) async {
     if (widget.controller.user?.role != Role.admin) return;
     final source = await showModalBottomSheet<String>(
       context: context,
@@ -100,6 +136,10 @@ class _VentureDetailPageState extends State<VentureDetailPage> {
     );
     if (source == null || !mounted) return;
     try {
+      final intent = await _recovery.rememberSelection(
+        widget.ventureId,
+        layout,
+      );
       final List<int> bytes;
       final String filename;
       if (source == 'file') {
@@ -118,54 +158,100 @@ class _VentureDetailPageState extends State<VentureDetailPage> {
         bytes = await selected.readAsBytes();
         filename = selected.name;
       } else {
-        final selected = await ImagePicker().pickImage(
-          source: source == 'camera' ? ImageSource.camera : ImageSource.gallery,
-          requestFullMetadata: false,
+        final selected = await _recovery.pick(
+          source == 'camera' ? ImageSource.camera : ImageSource.gallery,
+          intent,
         );
         if (selected == null) return;
-        bytes = await selected.readAsBytes();
+        bytes = await readSizedPhoto(selected);
         filename = selected.name;
       }
-      final mime = switch (filename.split('.').last.toLowerCase()) {
-        'png' => 'image/png',
-        'jpg' || 'jpeg' => 'image/jpeg',
-        'webp' => 'image/webp',
-        'pdf' => 'application/pdf',
-        'svg' => 'image/svg+xml',
-        _ => '',
-      };
-      if (bytes.isEmpty || bytes.length > 4 * 1024 * 1024) {
-        throw const AppFailure('Choose a nonempty file no larger than 4 MiB.');
-      }
-      if (mime.isEmpty ||
-          (!layout &&
-              !['image/png', 'image/jpeg', 'image/webp'].contains(mime)) ||
-          (layout && mime == 'image/webp')) {
-        throw const AppFailure(
-          'This file type is not supported. Choose one of the listed formats.',
-        );
-      }
-      if (!mounted) return;
-      setState(() {
-        _bytes = bytes;
-        _filename = filename;
-        _mime = mime;
-        _layout = layout;
-        _uploadError = null;
-        _progress = null;
-      });
+      if (mounted) _setSelection(bytes, filename, intent);
     } catch (error) {
       if (mounted) showFeedback(context, failureMessage(error));
+    } finally {
+      try {
+        await _recovery.clearPending();
+      } catch (_) {
+        if (mounted) {
+          showFeedback(
+            context,
+            'Could not clear the picker state. If the app restarts, review any recovered selection carefully.',
+          );
+        }
+      }
     }
   }
 
+  void _setSelection(
+    List<int> bytes,
+    String filename,
+    PhotoIntent intent, {
+    bool recovered = false,
+  }) {
+    if (!_recovery.accepts(intent, ventureId: widget.ventureId)) {
+      throw const AppFailure(
+        'Your session changed. Select the file again in the intended venture.',
+      );
+    }
+    final layout = intent.layout;
+    final mime = switch (filename.split('.').last.toLowerCase()) {
+      'png' => 'image/png',
+      'jpg' || 'jpeg' => 'image/jpeg',
+      'webp' => 'image/webp',
+      'pdf' => 'application/pdf',
+      'svg' => 'image/svg+xml',
+      _ => '',
+    };
+    if (bytes.isEmpty || bytes.length > 4 * 1024 * 1024) {
+      throw const AppFailure('Choose a nonempty file no larger than 4 MiB.');
+    }
+    if (mime.isEmpty ||
+        (!layout &&
+            !['image/png', 'image/jpeg', 'image/webp'].contains(mime)) ||
+        (layout && mime == 'image/webp')) {
+      throw const AppFailure(
+        'This file type is not supported. Choose one of the listed formats.',
+      );
+    }
+    if (!mounted) return;
+    setState(() {
+      _bytes = bytes;
+      _filename = filename;
+      _mime = mime;
+      _layout = layout;
+      _uploadError = null;
+      _progress = null;
+      _selectionIntent = intent;
+      _recoveredSelection = recovered;
+    });
+  }
+
   Future<void> _upload() async {
+    if (_picking || _uploading) return;
     if (_bytes == null || _filename == null || _mime == null) return;
+    final intent = _selectionIntent;
+    if (intent == null ||
+        !_recovery.accepts(intent, ventureId: widget.ventureId)) {
+      showFeedback(
+        context,
+        'Your account or mode changed. Select the file again.',
+      );
+      return;
+    }
     if (!await confirmAction(
       context,
       'Replace venture image?',
       'The current backend stores a photo and a layout in the same field. This upload replaces the venture’s current image${widget.controller.isOffline ? ' locally' : ' on the server'}.',
     )) {
+      return;
+    }
+    if (!mounted) return;
+    if (!_recovery.accepts(intent, ventureId: widget.ventureId)) {
+      showFeedback(
+        context,
+        'Your account or mode changed. Select the file again.',
+      );
       return;
     }
     setState(() {
@@ -174,6 +260,10 @@ class _VentureDetailPageState extends State<VentureDetailPage> {
       _progress = 0;
     });
     try {
+      await _recovery.discard();
+      if (!_recovery.accepts(intent, ventureId: widget.ventureId)) {
+        throw const AppFailure('Your session changed. Select the image again.');
+      }
       await activeRepository(widget.controller).uploadVenture(
         widget.ventureId,
         _bytes!,
@@ -191,6 +281,8 @@ class _VentureDetailPageState extends State<VentureDetailPage> {
           _bytes = null;
           _filename = null;
           _progress = null;
+          _selectionIntent = null;
+          _recoveredSelection = false;
         });
         showFeedback(context, savedMessage(widget.controller));
         await _load();
@@ -350,7 +442,7 @@ class _VentureDetailPageState extends State<VentureDetailPage> {
                       if (admin) ...[
                         const SizedBox(height: Brand.gap),
                         OutlinedButton.icon(
-                          onPressed: _uploading
+                          onPressed: _uploading || _picking
                               ? null
                               : () async {
                                   final saved = await Navigator.push<bool>(
@@ -374,14 +466,14 @@ class _VentureDetailPageState extends State<VentureDetailPage> {
                           runSpacing: 8,
                           children: [
                             OutlinedButton.icon(
-                              onPressed: _uploading
+                              onPressed: _uploading || _picking
                                   ? null
                                   : () => _chooseUpload(true),
                               icon: const Icon(Icons.upload_file_outlined),
                               label: const Text('Choose layout'),
                             ),
                             OutlinedButton.icon(
-                              onPressed: _uploading
+                              onPressed: _uploading || _picking
                                   ? null
                                   : () => _chooseUpload(false),
                               icon: const Icon(
@@ -399,6 +491,30 @@ class _VentureDetailPageState extends State<VentureDetailPage> {
                         if (_filename != null) ...[
                           const SizedBox(height: Brand.gap),
                           Text('Selected: $_filename'),
+                          if (_recoveredSelection)
+                            const Text(
+                              'Recovered selection. Check the venture and preview before uploading.',
+                            ),
+                          if (_bytes != null &&
+                              [
+                                'image/png',
+                                'image/jpeg',
+                                'image/webp',
+                              ].contains(_mime))
+                            Padding(
+                              padding: const EdgeInsets.only(
+                                top: Brand.compact,
+                              ),
+                              child: Image.memory(
+                                Uint8List.fromList(_bytes!),
+                                height: 180,
+                                fit: BoxFit.contain,
+                                semanticLabel: 'Selected image preview',
+                                errorBuilder: (_, _, _) => const Text(
+                                  'Preview unavailable. Select a different image if needed.',
+                                ),
+                              ),
+                            ),
                           if (_uploading) ...[
                             const SizedBox(height: Brand.compact),
                             LinearProgressIndicator(
@@ -420,16 +536,31 @@ class _VentureDetailPageState extends State<VentureDetailPage> {
                                 ? 'Upload selected file'
                                 : 'Retry upload',
                             busy: _uploading,
-                            onPressed: _upload,
+                            onPressed: _picking ? null : _upload,
                           ),
                           TextButton(
-                            onPressed: _uploading
+                            onPressed: _uploading || _picking
                                 ? null
-                                : () => setState(() {
-                                    _bytes = null;
-                                    _filename = null;
-                                    _uploadError = null;
-                                  }),
+                                : () async {
+                                    try {
+                                      await _recovery.discard();
+                                      if (!mounted) return;
+                                      setState(() {
+                                        _bytes = null;
+                                        _filename = null;
+                                        _uploadError = null;
+                                        _selectionIntent = null;
+                                        _recoveredSelection = false;
+                                      });
+                                    } catch (_) {
+                                      if (context.mounted) {
+                                        showFeedback(
+                                          context,
+                                          'Could not discard the selection. Please try again.',
+                                        );
+                                      }
+                                    }
+                                  },
                             child: const Text('Discard selection'),
                           ),
                         ],

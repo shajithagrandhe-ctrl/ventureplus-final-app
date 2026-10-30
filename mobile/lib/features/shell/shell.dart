@@ -218,6 +218,16 @@ class _AppShellState extends State<AppShell> {
                   style: TextStyle(color: Brand.warning, fontSize: 12),
                 ),
               ),
+            if (!app.isOffline && app.sessionWarning != null)
+              Semantics(
+                liveRegion: true,
+                child: Container(
+                  width: double.infinity,
+                  color: Brand.amberLight,
+                  padding: const EdgeInsets.all(Brand.gap),
+                  child: Text(app.sessionWarning!),
+                ),
+              ),
             Expanded(
               child: AnimatedSwitcher(
                 duration: MediaQuery.disableAnimationsOf(context)
@@ -276,12 +286,9 @@ class _PasswordPageState extends State<PasswordPage> {
         current.text,
         next.text,
       );
-      if (mounted) {
-        showFeedback(context, 'Password updated on the server.');
-        Navigator.pop(context);
-      }
+      await widget.controller.passwordChanged();
     } catch (e) {
-      if (mounted) setState(() => error = e.toString());
+      if (mounted) setState(() => error = failureMessage(e));
     } finally {
       if (mounted) setState(() => busy = false);
     }

@@ -1,0 +1,44 @@
+✔ structured ownership rejects suffixes and incidental notes (1.9925ms)
+✔ scope helpers deny absent/unknown principals and preserve Agent scope (1.5304ms)
+✔ anonymous callers cannot read protected resources (64.1175ms)
+✔ customer plot details contain only own leads and foreign plots stay hidden (13.63ms)
+✔ employee direct plot reads and writes honor assignments (34.706ms)
+✔ employee lead list and create/update/delete reject foreign plots (32.0529ms)
+✔ assignment removal takes effect on the next read and mutation (6.8658ms)
+✔ records and tracking use exact customer ownership and coherent pagination (3.7589ms)
+✔ employee cannot take over or delete another employee record (8.7081ms)
+✔ free-text notes cannot inject, transfer or erase customer ownership (11.7911ms)
+✔ lead creation establishes its validated email linkage and ignores ownership text in notes (3.4326ms)
+✔ duplicate employee aliases fail closed without losing exact email ownership (2.4385ms)
+✔ customer statistics count only accessible plots, leads and records (2.5236ms)
+✔ customer favorites reject foreign IDs and filter inaccessible retained favorites (7.1241ms)
+✔ tracking writes enforce employee ownership and coordinate bounds (9.7753ms)
+✔ Customer and Agent never gain Employee mutation permissions (29.576ms)
+✔ employee admin routes denied and staff editor cannot target another role (16.9656ms)
+✔ employee email changes fail clearly while case-equivalent edits preserve ownership (6.0965ms)
+✔ layout regions enforce normalized coordinates and bounded polygon shape (8.5613ms)
+✔ uploads validate bytes, enforce file limits and sandbox SVG delivery (30.7817ms)
+✔ existing tokens recheck frozen status and current role (5.6914ms)
+✔ non-admin realtime contains no record IDs, contacts or coordinates (0.9032ms)
+✔ SSE strips private payload and closes after session freeze (4.9833ms)
+✔ WebSocket strips private payload and closes after session freeze (14.5615ms)
+✔ persisted sessions reject legacy tokens, missing sessions, mismatched owners and expired state (10.6945ms)
+✔ logout revokes the captured cookie token but preserves another session for the same user (14.6905ms)
+✔ logout revocation closes an existing SSE subscription before another private event (14.0437ms)
+✔ malformed and oversized JSON return bounded client errors without echoing the payload (18.7678ms)
+✔ a concurrent password-change conflict returns a bounded error without Prisma details (1235.1604ms)
+✔ registration issues a persisted session for unchanged credentials (428.6939ms)
+✔ registration cannot issue a session after an intervening password reset (397.4546ms)
+✔ request logging redacts authorization, cookies and CSRF values while retaining diagnostics (3.4691ms)
+✔ preserves UUID IDs, password hashes, timestamps and nullable codes (7.071ms)
+✔ preserves BSON IDs, references, and binary upload bytes (2.2454ms)
+✔ preserves JSON assignment lists and maps absent nullable JSON to SQL NULL (0.8714ms)
+✔ rejects unknown fields, missing IDs, invalid dates and null required fields (2.2854ms)
+ℹ tests 36
+ℹ suites 0
+ℹ pass 36
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4554.041

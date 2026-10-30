@@ -42,8 +42,8 @@ try {
     $env:REALTIME_REDIS_URL = ''
     Push-Location (Join-Path $workspace 'reference-web')
     try {
-        & node node_modules/prisma/build/index.js db push --schema database/schema.prisma --skip-generate
-        if ($LASTEXITCODE -ne 0) { throw 'Schema creation in the new test database failed.' }
+        & node node_modules/prisma/build/index.js migrate deploy --schema database/schema.prisma
+        if ($LASTEXITCODE -ne 0) { throw 'Migrations in the new test database failed.' }
         & node node_modules/typescript/bin/tsc -p server/tsconfig.json
         if ($LASTEXITCODE -ne 0) { throw 'Backend compilation failed.' }
         & node --test server/tests/mysql-authorization.test.cjs

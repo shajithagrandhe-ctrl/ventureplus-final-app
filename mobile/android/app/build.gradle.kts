@@ -1,7 +1,24 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+val signingProperties = Properties()
+val signingPropertiesFile = System.getenv("VENTUREPLUS_SIGNING_PROPERTIES")?.let { file(it) }
+    ?: rootProject.file("key.properties").takeIf { it.exists() }
+    ?: rootProject.file("../../.local/signing/key.properties")
+if (signingPropertiesFile.exists()) {
+    signingPropertiesFile.inputStream().use { signingProperties.load(it) }
+}
+if (gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }) {
+    require(listOf("storeFile", "storePassword", "keyAlias", "keyPassword").all {
+        !signingProperties.getProperty(it).isNullOrBlank()
+    }) {
+        "Release signing is not configured. See docs/ANDROID-RELEASE.md. Debug keys are never used for release builds."
+    }
 }
 
 android {
@@ -15,7 +32,6 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.ventureplus.ventureplus"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
@@ -27,13 +43,21 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        create("release") {
+            keyAlias = signingProperties.getProperty("keyAlias")
+            keyPassword = signingProperties.getProperty("keyPassword")
+            storeFile = signingProperties.getProperty("storeFile")?.let { file(it) }
+            storePassword = signingProperties.getProperty("storePassword")
+        }
     }
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }
@@ -46,4 +70,13 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // Keep Flutter's debug-only integration runner aligned with native tests.
+    debugImplementation("androidx.test:runner:1.6.2")
+    debugImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
 }

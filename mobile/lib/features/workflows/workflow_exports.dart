@@ -32,7 +32,7 @@ String _icsEscape(Object? text) => '${text ?? ''}'
     .replaceAll('\\', '\\\\')
     .replaceAll(';', r'\;')
     .replaceAll(',', r'\,')
-    .replaceAll(RegExp(r'\r?\n'), r'\n');
+    .replaceAll(RegExp(r'\r\n|\r|\n'), r'\n');
 String _icsDate(DateTime value) =>
     '${value.toUtc().toIso8601String().replaceAll(RegExp(r'[-:]'), '').split('.').first}Z';
 

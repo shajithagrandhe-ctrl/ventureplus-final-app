@@ -24,3 +24,7 @@ plugins {
 }
 
 include(":app")
+
+if (providers.gradleProperty("ventureplusNativeQa").orNull == "true") {
+    include(":nativeqa")
+}

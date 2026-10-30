@@ -1,0 +1,41 @@
+Exact installed APK SHA-256: DEA8EC66BCD74BA14EBC738371ADD90B84748C555EA848048637F669D263D80D
+Android API 36 x86_64; VenturePlus_Release_API36; non-debuggable release.
+Independent nativeqa UIAutomator host; fictional Offline Demo data only.
+
+INSTRUMENTATION_STATUS: class=com.ventureplus.ventureplus.NativeWorkflowTest
+INSTRUMENTATION_STATUS: current=1
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=2
+INSTRUMENTATION_STATUS: stream=
+com.ventureplus.ventureplus.NativeWorkflowTest:
+INSTRUMENTATION_STATUS: test=nativePickers
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ventureplus.ventureplus.NativeWorkflowTest
+INSTRUMENTATION_STATUS: current=1
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=2
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=nativePickers
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ventureplus.ventureplus.NativeWorkflowTest
+INSTRUMENTATION_STATUS: current=2
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=2
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=nativeExportsAndKeyboard
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ventureplus.ventureplus.NativeWorkflowTest
+INSTRUMENTATION_STATUS: current=2
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=2
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=nativeExportsAndKeyboard
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_RESULT: stream=
+
+Time: 105.8
+
+OK (2 tests)
+
+
+INSTRUMENTATION_CODE: -1

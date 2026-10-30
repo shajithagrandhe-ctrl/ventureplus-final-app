@@ -565,6 +565,46 @@ void main() {
       },
     );
 
+    test('offline provisioning validates raw password boundaries without persisting passwords', () async {
+      final store = MemoryStore();
+      final repo = await OfflineRepository.open(store, Role.admin);
+      final employee = {
+        'email': 'edge-employee@fictional.example',
+        'fullName': 'Edge Employee',
+        'displayName': 'Edge Employee',
+      };
+      await expectLater(
+        repo.create(Resource.employeeAccess, {
+          ...employee,
+          'password': ' abc ',
+        }),
+        throwsA(isA<AppFailure>()),
+      );
+      final createdEmployee = await repo.create(Resource.employeeAccess, {
+        ...employee,
+        'password': ' abcd ',
+      });
+      expect(createdEmployee['email'], employee['email']);
+      final customer = {
+        'email': 'edge-customer@fictional.example',
+        'fullName': 'Edge Customer',
+        'displayName': 'Edge Customer',
+      };
+      await expectLater(
+        repo.provisionCustomer({...customer, 'password': ' abcde '}),
+        throwsA(isA<AppFailure>()),
+      );
+      final createdCustomer = await repo.provisionCustomer({
+        ...customer,
+        'password': ' abcdef ',
+      });
+      expect(createdCustomer['user']['email'], customer['email']);
+      final saved = (await store.read(OfflineRepository.storageKey))!;
+      expect(saved, isNot(contains('"password"')));
+      expect(saved, isNot(contains(' abcd ')));
+      expect(saved, isNot(contains(' abcdef ')));
+    });
+
     test('region object and upload bytes persist locally', () async {
       final store = MemoryStore();
       final repo = await OfflineRepository.open(store, Role.admin);

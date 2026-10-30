@@ -1,0 +1,41 @@
+
+> test
+> npm run test -w client && npm run test -w server && node --test backend/gateway.test.mjs
+
+
+> vite_react_shadcn_ts@0.0.0 test
+> vitest run
+
+X [ERROR] Cannot read directory "../../../..": Access is denied.
+
+X [ERROR] Could not resolve "C:\\Users\\shaji\\Downloads\\ventureplus final app code\\reference-web\\client\\vitest.config.ts"
+
+failed to load config from C:\Users\shaji\Downloads\ventureplus final app code\reference-web\client\vitest.config.ts
+
+⎯⎯⎯⎯⎯⎯⎯ Startup Error ⎯⎯⎯⎯⎯⎯⎯⎯
+Error: Build failed with 2 errors:
+error: Cannot read directory "../../../..": Access is denied.
+error: Could not resolve "C:\\Users\\shaji\\Downloads\\ventureplus final app code\\reference-web\\client\\vitest.config.ts"
+    at failureErrorWithLog (C:\Users\shaji\Downloads\ventureplus final app code\reference-web\node_modules\vite\node_modules\esbuild\lib\main.js:1467:15)
+    at C:\Users\shaji\Downloads\ventureplus final app code\reference-web\node_modules\vite\node_modules\esbuild\lib\main.js:926:25
+    at runOnEndCallbacks (C:\Users\shaji\Downloads\ventureplus final app code\reference-web\node_modules\vite\node_modules\esbuild\lib\main.js:1307:45)
+    at buildResponseToResult (C:\Users\shaji\Downloads\ventureplus final app code\reference-web\node_modules\vite\node_modules\esbuild\lib\main.js:924:7)
+    at C:\Users\shaji\Downloads\ventureplus final app code\reference-web\node_modules\vite\node_modules\esbuild\lib\main.js:951:16
+    at responseCallbacks.<computed> (C:\Users\shaji\Downloads\ventureplus final app code\reference-web\node_modules\vite\node_modules\esbuild\lib\main.js:603:9)
+    at handleIncomingPacket (C:\Users\shaji\Downloads\ventureplus final app code\reference-web\node_modules\vite\node_modules\esbuild\lib\main.js:658:12)
+    at Socket.readFromStdout (C:\Users\shaji\Downloads\ventureplus final app code\reference-web\node_modules\vite\node_modules\esbuild\lib\main.js:581:7)
+    at Socket.emit (node:events:514:28)
+    at addChunk (node:internal/streams/readable:569:12) {
+  errors: [Getter/Setter],
+  warnings: [Getter/Setter]
+}
+
+
+
+npm error Lifecycle script `test` failed with error:
+npm error code 1
+npm error path C:\Users\shaji\Downloads\ventureplus final app code\reference-web\client
+npm error workspace vite_react_shadcn_ts@0.0.0
+npm error location C:\Users\shaji\Downloads\ventureplus final app code\reference-web\client
+npm error command failed
+npm error command C:\Windows\system32\cmd.exe /d /s /c vitest run

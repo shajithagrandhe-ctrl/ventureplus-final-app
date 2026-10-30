@@ -52,6 +52,8 @@ class DioApiTransport implements ApiTransport {
   final Dio dio;
   final Map<String, String> _cookies = {};
   String? _csrf;
+  bool _cookieSavePending = false;
+  void Function(String?)? onSessionWarning;
   Future<void> _writes = Future<void>.value();
   String get _storageKey =>
       'ventureplus.cookies.${Uri.encodeComponent(baseUrl)}';
@@ -88,10 +90,13 @@ class DioApiTransport implements ApiTransport {
     _cookies.clear();
     _csrf = null;
     if (!platform.usesBrowserCookies) await cookieStore.remove(_storageKey);
+    _cookieSavePending = false;
+    onSessionWarning?.call(null);
   }
 
   Future<void> _rememberCookies(Response<dynamic> response) async {
     if (platform.usesBrowserCookies) return;
+    final before = jsonEncode(_cookies);
     for (final header in response.headers['set-cookie'] ?? <String>[]) {
       final parts = header.split(';');
       final equals = parts.first.indexOf('=');
@@ -108,7 +113,20 @@ class DioApiTransport implements ApiTransport {
         _cookies[name] = value;
       }
     }
-    await cookieStore.write(_storageKey, jsonEncode(_cookies));
+    final current = jsonEncode(_cookies);
+    if (current == before && !_cookieSavePending) return;
+    try {
+      await cookieStore.write(_storageKey, current);
+      _cookieSavePending = false;
+      onSessionWarning?.call(null);
+    } on Object {
+      // A confirmed server write must not become a retryable business failure
+      // just because this device cannot persist its refreshed cookie jar.
+      _cookieSavePending = true;
+      onSessionWarning?.call(
+        'This device could not save your sign-in session. You may need to sign in again after restarting the app.',
+      );
+    }
   }
 
   @override

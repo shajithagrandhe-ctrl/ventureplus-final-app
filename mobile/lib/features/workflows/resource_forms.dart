@@ -349,7 +349,7 @@ const customerAccountFields = [
     'password',
     'Temporary password',
     kind: FieldKind.password,
-    minLength: 6,
+    minLength: 8,
   ),
   FormFieldSpec('phoneNumber', 'Phone number', required: false),
   FormFieldSpec('address', 'Address', required: false),

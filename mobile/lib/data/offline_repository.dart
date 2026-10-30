@@ -333,6 +333,13 @@ class OfflineRepository implements VentureRepository {
     }
   }
 
+  void _password(JsonMap values, int minimum) {
+    final value = values['password'];
+    if (value is! String || value.length < minimum) {
+      throw AppFailure('password must contain at least $minimum characters.');
+    }
+  }
+
   void _number(JsonMap values, String key, {int maximum = 2147483647}) {
     final value = values[key];
     if (value is! num ||
@@ -488,7 +495,7 @@ class OfflineRepository implements VentureRepository {
           _rows('tracking', data).add(row);
         case Resource.employeeAccess:
           _email(value, 'email');
-          _text(value, 'password', 6);
+          _password(value, 6);
           if (_rows('users', data).any((u) => u['email'] == value['email'])) {
             throw const AppFailure('This email is already in use in the demo.');
           }
@@ -746,7 +753,7 @@ class OfflineRepository implements VentureRepository {
   Future<JsonMap> provisionCustomer(JsonMap values) async {
     Permissions.require(user.role == Role.admin || user.role == Role.employee);
     _email(values, 'email');
-    _text(values, 'password', 8);
+    _password(values, 8);
     _text(values, 'displayName', 2);
     _text(values, 'fullName', 2);
     return _write((data) {

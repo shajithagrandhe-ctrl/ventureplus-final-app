@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'core/app_controller.dart';
 import 'features/auth/login_page.dart';
 import 'features/shell/shell.dart';
+import 'features/workflows/picker_recovery_host.dart';
 import 'ui/components.dart';
 import 'ui/theme.dart';
 
@@ -44,9 +45,12 @@ class _VentureAppState extends State<VentureApp> {
         themeMode: ThemeMode.light,
         home: !ready
             ? const StartupPage()
-            : controller.user == null
-            ? LoginPage(controller: controller)
-            : AppShell(controller: controller),
+            : PickerRecoveryHost(
+                controller: controller,
+                child: controller.user == null
+                    ? LoginPage(controller: controller)
+                    : AppShell(controller: controller),
+              ),
         onUnknownRoute: (_) => MaterialPageRoute<void>(
           builder: (_) => Scaffold(
             appBar: AppBar(title: const Text('Page unavailable')),

@@ -1,0 +1,97 @@
+
+> test
+> npm run test -w client && npm run test -w server && node --test backend/gateway.test.mjs
+
+
+> vite_react_shadcn_ts@0.0.0 test
+> vitest run
+
+
+ RUN  v4.1.12 C:/Users/shaji/Downloads/ventureplus final app code/reference-web/client
+
+
+ Test Files  2 passed (2)
+      Tests  2 passed (2)
+   Start at  08:48:18
+   Duration  2.58s (transform 77ms, setup 279ms, import 157ms, tests 54ms, environment 1.43s)
+
+
+> estatehub-server@1.0.0 test
+> npm run build && node --test tests/authorization.test.cjs tests/logging.test.cjs tests/mongo-mysql-record.test.mjs
+
+
+> estatehub-server@1.0.0 prebuild
+> npm run prisma:generate
+
+
+> estatehub-server@1.0.0 prisma:generate
+> prisma generate --schema ../database/schema.prisma && node ./scripts/sync-prisma-client.mjs
+
+Prisma schema loaded from ..\database\schema.prisma
+
+✔ Generated Prisma Client (v5.22.0) to .\..\node_modules\@prisma\client in 140ms
+
+Start by importing your Prisma Client (See: https://pris.ly/d/importing-client)
+
+Tip: Curious about the SQL queries Prisma ORM generates? Optimize helps you enhance your visibility: https://pris.ly/tip-2-optimize
+
+[prisma-sync] Synced Prisma client to C:\Users\shaji\Downloads\ventureplus final app code\reference-web\server\node_modules\.prisma\client
+
+> estatehub-server@1.0.0 build
+> tsc -p tsconfig.json
+
+✔ structured ownership rejects suffixes and incidental notes (6.782ms)
+✔ scope helpers deny absent/unknown principals and preserve Agent scope (2.7017ms)
+✔ anonymous callers cannot read protected resources (86.8272ms)
+✔ customer plot details contain only own leads and foreign plots stay hidden (15.1967ms)
+✔ employee direct plot reads and writes honor assignments (30.0864ms)
+✔ employee lead list and create/update/delete reject foreign plots (41.7709ms)
+✔ assignment removal takes effect on the next read and mutation (14.58ms)
+✔ records and tracking use exact customer ownership and coherent pagination (7.3024ms)
+✔ employee cannot take over or delete another employee record (13.3753ms)
+✔ free-text notes cannot inject, transfer or erase customer ownership (21.7995ms)
+✔ lead creation establishes its validated email linkage and ignores ownership text in notes (6.5187ms)
+✔ duplicate employee aliases fail closed without losing exact email ownership (4.7297ms)
+✔ customer statistics count only accessible plots, leads and records (5.2843ms)
+✔ customer favorites reject foreign IDs and filter inaccessible retained favorites (13.1585ms)
+✔ tracking writes enforce employee ownership and coordinate bounds (16.7227ms)
+✔ Customer and Agent never gain Employee mutation permissions (60.5641ms)
+✔ employee admin routes denied and staff editor cannot target another role (23.5434ms)
+✔ employee email changes fail clearly while case-equivalent edits preserve ownership (10.7785ms)
+✔ layout regions enforce normalized coordinates and bounded polygon shape (13.053ms)
+✔ uploads validate bytes, enforce file limits and sandbox SVG delivery (52.5305ms)
+✔ existing tokens recheck frozen status and current role (10.7192ms)
+✔ non-admin realtime contains no record IDs, contacts or coordinates (1.6094ms)
+✔ SSE strips private payload and closes after session freeze (8.1173ms)
+✔ WebSocket strips private payload and closes after session freeze (14.6922ms)
+✔ persisted sessions reject legacy tokens, missing sessions, mismatched owners and expired state (11.9116ms)
+✔ logout revokes the captured cookie token but preserves another session for the same user (15.4012ms)
+✔ logout revocation closes an existing SSE subscription before another private event (6.4835ms)
+✔ malformed and oversized JSON return bounded client errors without echoing the payload (21.934ms)
+✔ a concurrent password-change conflict returns a bounded error without Prisma details (962.8409ms)
+✔ registration issues a persisted session for unchanged credentials (339.7965ms)
+✔ registration cannot issue a session after an intervening password reset (324.46ms)
+✔ request logging redacts authorization, cookies and CSRF values while retaining diagnostics (2.9268ms)
+✔ preserves UUID IDs, password hashes, timestamps and nullable codes (6.4495ms)
+✔ preserves BSON IDs, references, and binary upload bytes (1.2084ms)
+✔ preserves JSON assignment lists and maps absent nullable JSON to SQL NULL (0.691ms)
+✔ rejects unknown fields, missing IDs, invalid dates and null required fields (2.9228ms)
+ℹ tests 36
+ℹ suites 0
+ℹ pass 36
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4156.693
+✔ gateway preserves the configured service path, query, body, status and cookie (21.8227ms)
+✔ absolute, protocol-relative and backslash request targets cannot select another upstream (6.192ms)
+✔ missing, malformed and non-HTTP bindings fail closed without leaking details (3.6703ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1024.6475

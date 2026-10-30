@@ -36,7 +36,77 @@ ResponseBody response(
   },
 );
 
+class FailingCookieStore extends MemoryStore {
+  bool failWrites = false;
+  int writes = 0;
+  @override
+  Future<void> write(String key, String value) async {
+    writes++;
+    if (failWrites) throw StateError('storage locked');
+    await super.write(key, value);
+  }
+}
+
 void main() {
+  test(
+    'unchanged cookies do not write storage after successful mutation',
+    () async {
+      final store = FailingCookieStore();
+      final adapter = RecordingAdapter((request) async {
+        if (request.path == '/auth/csrf') {
+          return response({'token': 'csrf'}, cookies: ['estatehub_csrf=csrf']);
+        }
+        store.failWrites = true;
+        return response({'id': 'created-on-server'});
+      });
+      final transport = DioApiTransport(
+        baseUrl: 'https://example.test/api',
+        cookieStore: store,
+        dio: Dio()..httpClientAdapter = adapter,
+      );
+      final result = await transport.request('POST', '/total-data', data: {});
+      expect(jsonObject(result['data'])['id'], 'created-on-server');
+      expect(store.writes, 1);
+      expect(
+        adapter.requests.where((r) => r.path == '/total-data'),
+        hasLength(1),
+      );
+    },
+  );
+
+  test('cookie persistence failure preserves server success and reports a session warning', () async {
+    final store = FailingCookieStore();
+    String? warning;
+    final adapter = RecordingAdapter((request) async {
+      if (request.path == '/auth/csrf') {
+        return response({'token': 'csrf'}, cookies: ['estatehub_csrf=csrf']);
+      }
+      if (request.method == 'POST') {
+        store.failWrites = true;
+        return response({'id': 'saved'}, cookies: ['estatehub_csrf=rotated']);
+      }
+      expect(request.headers['Cookie'], contains('estatehub_csrf=rotated'));
+      return response([]);
+    });
+    final transport = DioApiTransport(
+      baseUrl: 'https://example.test/api',
+      cookieStore: store,
+      dio: Dio()..httpClientAdapter = adapter,
+    )..onSessionWarning = (message) => warning = message;
+    final result = await transport.request(
+      'POST',
+      '/ventures/v1/photo',
+      data: {},
+    );
+    expect(jsonObject(result['data'])['id'], 'saved');
+    expect(warning, contains('could not save your sign-in session'));
+    expect(adapter.requests.where((r) => r.method == 'POST'), hasLength(1));
+    store.failWrites = false;
+    await transport.request('GET', '/plots');
+    expect(warning, isNull);
+    expect(store.values.values.single, contains('rotated'));
+  });
+
   test('login keeps HttpOnly access cookie, rotates CSRF and persists only cookies', () async {
     final store = MemoryStore();
     final adapter = RecordingAdapter((request) async {
@@ -232,6 +302,6 @@ void main() {
       dio: Dio()..httpClientAdapter = adapter,
     );
     await transport.request('GET', '/plots');
-    expect(jsonDecode(store.values.values.single), isEmpty);
+    expect(store.values, isEmpty);
   });
 }

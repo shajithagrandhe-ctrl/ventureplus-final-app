@@ -1,0 +1,7 @@
+
+> lint:backend
+> npm run lint -w server && eslint --config server/eslint.config.mjs backend/index.mjs backend/gateway.test.mjs
+
+
+> estatehub-server@1.0.0 lint
+> eslint . --max-warnings 0

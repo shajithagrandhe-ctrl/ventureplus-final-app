@@ -1,0 +1,42 @@
+
+> build
+> npm run build -w client && npm run build -w server
+
+
+> vite_react_shadcn_ts@0.0.0 build
+> vite build
+
+vite v6.4.5 building for production...
+transforming...
+✓ 1767 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   1.18 kB │ gzip:   0.51 kB
+dist/assets/index-DV2WAAhq.css   98.72 kB │ gzip:  16.39 kB
+dist/assets/index-CMSZAW6L.js   689.48 kB │ gzip: 197.96 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 39.93s
+
+> estatehub-server@1.0.0 prebuild
+> npm run prisma:generate
+
+
+> estatehub-server@1.0.0 prisma:generate
+> prisma generate --schema ../database/schema.prisma && node ./scripts/sync-prisma-client.mjs
+
+Prisma schema loaded from ..\database\schema.prisma
+
+✔ Generated Prisma Client (v5.22.0) to .\..\node_modules\@prisma\client in 247ms
+
+Start by importing your Prisma Client (See: https://pris.ly/d/importing-client)
+
+Tip: Easily identify and fix slow SQL queries in your app. Optimize helps you enhance your visibility: https://pris.ly/--optimize
+
+[prisma-sync] Synced Prisma client to C:\Users\shaji\Downloads\ventureplus final app code\reference-web\server\node_modules\.prisma\client
+
+> estatehub-server@1.0.0 build
+> tsc -p tsconfig.json

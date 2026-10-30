@@ -17,6 +17,32 @@ import 'package:ventureplus/ui/theme.dart';
 import 'core_data_test.dart' show FakeTransport;
 
 void main() {
+  testWidgets('search accessibility target is confined to the input field', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    try {
+      final app = AppController(
+        transport: FakeTransport(),
+        preferences: MemoryStore(),
+      );
+      addTearDown(app.dispose);
+      await app.enterOffline(Role.admin);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: WorkflowPage(controller: app, resource: Resource.customers),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final field = find.byType(TextField);
+      final node = tester.getSemantics(field);
+      expect(node.rect.height, lessThan(160));
+      expect(node.label, isNot(contains('results')));
+      expect(node.rect.height, closeTo(tester.getSize(field).height, 1));
+    } finally {
+      semantics.dispose();
+    }
+  });
   test('rejects invalid API inputs and preserves boundary values', () {
     const email = FormFieldSpec('email', 'Email', kind: FieldKind.email);
     const count = FormFieldSpec(
@@ -172,6 +198,33 @@ void main() {
       throwsA(isA<AppFailure>()),
     );
   });
+
+  test('calendar text escapes bare CR, CRLF and LF without new properties', () {
+    final ics = customerReminder(
+      {'id': 'line-break-test', 'contactName': 'A\rB\r\nC\nD'},
+      DateTime.utc(2030, 1, 1, 9),
+      'first\rBEGIN:VEVENT\r\nthird\nfourth',
+    );
+    final unfolded = ics.replaceAll('\r\n ', '');
+    expect(unfolded, contains(r'SUMMARY:Follow-up: A\nB\nC\nD'));
+    expect(unfolded, contains(r'Notes: first\nBEGIN:VEVENT\nthird\nfourth'));
+    expect(ics.replaceAll('\r\n', ''), isNot(contains('\r')));
+    expect(
+      ics.split('\r\n').where((line) => line == 'BEGIN:VEVENT'),
+      hasLength(1),
+    );
+  });
+
+  test(
+    'customer account password uses the backend eight-character raw minimum',
+    () {
+      final password = customerAccountFields.singleWhere(
+        (field) => field.name == 'password',
+      );
+      expect(password.validate(' abcdef '), isNull);
+      expect(password.validate(' abcde '), isNotNull);
+    },
+  );
 
   testWidgets(
     'employee clearing sends null and blank password never resets it',
