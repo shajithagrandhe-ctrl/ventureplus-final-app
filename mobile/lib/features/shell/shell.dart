@@ -16,33 +16,39 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   int selected = 0;
   AppController get app => widget.controller;
+
   List<(String, IconData, Resource?)> get destinations =>
       switch (app.user!.role) {
         Role.admin => [
           ('Overview', Icons.space_dashboard_outlined, null),
-          ('Inventory', Icons.landscape_outlined, Resource.locations),
-          ('Customers', Icons.people_outline, Resource.customers),
-          ('Access', Icons.badge_outlined, Resource.employeeAccess),
+          ('Venture Locations', Icons.map_outlined, Resource.locations),
+          ('Customer records', Icons.people_outline, Resource.customers),
+          (
+            'Employee access',
+            Icons.person_search_outlined,
+            Resource.employeeAccess,
+          ),
         ],
         Role.employee => [
-          ('Overview', Icons.space_dashboard_outlined, null),
-          ('Inventory', Icons.landscape_outlined, Resource.locations),
-          ('Customers', Icons.people_outline, Resource.customers),
-          ('Leads', Icons.assignment_outlined, Resource.leads),
+          ('Dashboard', Icons.dashboard_outlined, null),
+          ('Venture Locations', Icons.map_outlined, Resource.locations),
+          ('Customer records', Icons.people_outline, Resource.customers),
+          ('Track Customers', Icons.groups_outlined, Resource.leads),
         ],
         Role.customer => [
-          ('Home', Icons.home_outlined, null),
-          ('My properties', Icons.landscape_outlined, Resource.locations),
-          ('Updates', Icons.location_on_outlined, Resource.tracking),
+          ('Dashboard', Icons.dashboard_outlined, null),
+          ('My properties', Icons.map_outlined, Resource.locations),
+          ('Plot Updates', Icons.navigation_outlined, Resource.tracking),
           ('Favorites', Icons.favorite_outline, Resource.favorites),
         ],
         Role.agent => [
-          ('Overview', Icons.space_dashboard_outlined, null),
-          ('Inventory', Icons.landscape_outlined, Resource.locations),
-          ('Leads', Icons.assignment_outlined, Resource.leads),
-          ('Tracking', Icons.location_on_outlined, Resource.tracking),
+          ('Dashboard', Icons.dashboard_outlined, null),
+          ('Venture Locations', Icons.map_outlined, Resource.locations),
+          ('Track Customers', Icons.groups_outlined, Resource.leads),
+          ('Live Tracking', Icons.navigation_outlined, Resource.tracking),
         ],
       };
+
   void open(Resource resource, String title) => Navigator.push(
     context,
     MaterialPageRoute<void>(
@@ -51,206 +57,480 @@ class _AppShellState extends State<AppShell> {
     ),
   );
 
+  Widget pageBody() {
+    final currentIndex = selected >= destinations.length
+        ? destinations.length - 1
+        : selected;
+    final destination = destinations[currentIndex];
+    return AnimatedSwitcher(
+      duration: MediaQuery.disableAnimationsOf(context)
+          ? Duration.zero
+          : Brand.transition,
+      child: destination.$3 == null
+          ? DashboardPage(
+              key: const ValueKey('dashboard'),
+              controller: app,
+              onOpen: open,
+            )
+          : WorkflowPage(
+              key: ValueKey(destination.$3),
+              controller: app,
+              resource: destination.$3!,
+              title: destination.$1,
+              showModeIndicator: false,
+            ),
+    );
+  }
+
+  Future<void> changePassword() async {
+    if (app.isOffline) return;
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(builder: (_) => PasswordPage(controller: app)),
+    );
+  }
+
   Future<void> profile() async {
     await showModalBottomSheet<void>(
       context: context,
-      isScrollControlled: true,
+      backgroundColor: Brand.sidebar,
       showDragHandle: true,
       builder: (context) => SafeArea(
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.all(Brand.gutter),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  app.user!.fullName,
-                  style: Theme.of(context).textTheme.titleLarge,
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
+          children: [
+            ListTile(
+              leading: const Icon(Icons.person_outline, color: Brand.cream),
+              title: Text(
+                app.user!.displayName,
+                style: const TextStyle(color: Brand.ink),
+              ),
+              subtitle: Text(
+                app.user!.email,
+                style: const TextStyle(color: Brand.secondary),
+              ),
+            ),
+            if (Permissions.canRead(app.user!.role, Resource.admins))
+              const ListTile(
+                leading: Icon(
+                  Icons.admin_panel_settings_outlined,
+                  color: Brand.secondary,
                 ),
-                Text(app.user!.email),
-                const SizedBox(height: Brand.compact),
-                Text(
-                  '${app.user!.role.label} · ${app.isOffline ? 'Offline Demo' : 'Connected'}',
+                title: Text(
+                  'Administrators',
+                  style: TextStyle(color: Brand.secondary),
                 ),
-                const Divider(height: Brand.section),
-                for (final item in <(String, IconData, Resource)>[
-                  (
-                    'Leads & reports',
-                    Icons.assignment_outlined,
-                    Resource.leads,
-                  ),
-                  (
-                    'Customer records',
-                    Icons.people_outline,
-                    Resource.customers,
-                  ),
-                  (
-                    'Tracking updates',
-                    Icons.location_on_outlined,
-                    Resource.tracking,
-                  ),
-                  ('Favorites', Icons.favorite_outline, Resource.favorites),
-                  (
-                    'Agent directory',
-                    Icons.support_agent_outlined,
-                    Resource.agents,
-                  ),
-                  ('Employees', Icons.badge_outlined, Resource.employees),
-                  (
-                    'Customer accounts',
-                    Icons.account_circle_outlined,
-                    Resource.customerAccounts,
-                  ),
-                  (
-                    'Administrators',
-                    Icons.admin_panel_settings_outlined,
-                    Resource.admins,
-                  ),
-                ])
-                  if (Permissions.canRead(app.user!.role, item.$3))
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: Icon(item.$2),
-                      title: Text(item.$1),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () {
-                        Navigator.pop(context);
-                        open(item.$3, item.$1);
-                      },
+              ),
+            ListTile(
+              leading: const Icon(Icons.key_outlined, color: Brand.secondary),
+              title: const Text(
+                'Change Password',
+                style: TextStyle(color: Brand.secondary),
+              ),
+              enabled: !app.isOffline,
+              onTap: app.isOffline ? null : changePassword,
+            ),
+            ListTile(
+              leading: const Icon(Icons.logout, color: Brand.secondary),
+              title: const Text(
+                'Log out / switch account',
+                style: TextStyle(color: Brand.secondary),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                app.logout();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget bottomNavigation({bool stressScale = false}) =>
+      MediaQuery.withClampedTextScaling(
+        maxScaleFactor: 1,
+        child: Builder(
+          builder: (context) {
+            return NavigationBar(
+              height: stressScale ? 56 : null,
+              labelBehavior: stressScale
+                  ? NavigationDestinationLabelBehavior.alwaysHide
+                  : null,
+              selectedIndex: selected,
+              onDestinationSelected: (index) {
+                if (stressScale) return;
+                setState(() => selected = index);
+              },
+              destinations: [
+                for (final item in destinations)
+                  NavigationDestination(icon: Icon(item.$2), label: item.$1),
+              ],
+            );
+          },
+        ),
+      );
+
+  Widget sidebar({bool closeOnSelect = false}) {
+    final currentIndex = selected >= destinations.length
+        ? destinations.length - 1
+        : selected;
+    final active = destinations[currentIndex];
+    final nameParts = app.user!.displayName.trim().split(RegExp(r'\s+'));
+    final initials = nameParts
+        .take(2)
+        .map((part) => part[0])
+        .join()
+        .toUpperCase();
+    return Material(
+      color: Brand.sidebar,
+      child: SafeArea(
+        child: SizedBox(
+          width: 264,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 24, 16, 20),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: Brand.sidebarAccent,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Center(
+                        child: Text(
+                          'V',
+                          style: TextStyle(
+                            color: Brand.ink,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
                     ),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.password_outlined),
-                  title: const Text('Change password'),
-                  subtitle: app.isOffline
-                      ? const Text('Unavailable for fictional demo accounts')
-                      : null,
-                  enabled: !app.isOffline,
-                  onTap: app.isOffline
-                      ? null
-                      : () {
-                          Navigator.pop(context);
-                          Navigator.push(
-                            this.context,
-                            MaterialPageRoute<void>(
-                              builder: (_) => PasswordPage(controller: app),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Venture Plus',
+                            style: TextStyle(
+                              color: Brand.ink,
+                              fontSize: 17,
+                              fontWeight: FontWeight.w700,
                             ),
-                          );
-                        },
+                          ),
+                          SizedBox(height: 2),
+                          Text(
+                            'For a Better Tomorrow',
+                            style: TextStyle(
+                              color: Brand.secondary,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.logout),
-                  title: const Text('Log out / switch account'),
-                  onTap: () async {
-                    Navigator.pop(context);
-                    await app.logout();
+              ),
+              const Divider(color: Brand.border, height: 1),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 19,
+                      backgroundColor: Brand.sidebarAccent,
+                      child: Text(
+                        initials,
+                        style: const TextStyle(
+                          color: Brand.ink,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            app.user!.displayName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Brand.ink,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          Text(
+                            app.user!.role.label,
+                            style: const TextStyle(
+                              color: Brand.secondary,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Profile and more screens',
+                      onPressed: profile,
+                      icon: const Icon(
+                        Icons.account_circle_outlined,
+                        color: Brand.secondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: app.isOffline
+                        ? Brand.amberLight
+                        : const Color(0x3322C55E),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 7,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.circle,
+                          size: 8,
+                          color: app.isOffline ? Brand.warning : Brand.success,
+                        ),
+                        const SizedBox(width: 7),
+                        Text(
+                          app.isOffline ? 'Offline Demo' : 'Connected',
+                          style: TextStyle(
+                            color: app.isOffline
+                                ? Brand.warning
+                                : Brand.success,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Expanded(
+                child: ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  itemCount: destinations.length,
+                  itemBuilder: (context, index) {
+                    final item = destinations[index];
+                    final isActive = item == active;
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(10),
+                        onTap: () {
+                          setState(() => selected = index);
+                          if (closeOnSelect) Navigator.pop(context);
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 13,
+                            vertical: 12,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isActive
+                                ? Brand.sidebarAccent
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                item.$2,
+                                size: 20,
+                                color: isActive ? Brand.ink : Brand.secondary,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  item.$1,
+                                  style: TextStyle(
+                                    color: isActive
+                                        ? Brand.ink
+                                        : const Color(0xCCCBD5E1),
+                                    fontSize: 13,
+                                    fontWeight: isActive
+                                        ? FontWeight.w700
+                                        : FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
                   },
                 ),
-              ],
-            ),
+              ),
+              const Divider(color: Brand.border, height: 1),
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  children: [
+                    ListTile(
+                      leading: const Icon(
+                        Icons.key_outlined,
+                        color: Brand.secondary,
+                      ),
+                      title: const Text(
+                        'Change Password',
+                        style: TextStyle(color: Brand.secondary, fontSize: 13),
+                      ),
+                      enabled: !app.isOffline,
+                      onTap: app.isOffline ? null : changePassword,
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.logout, color: Brand.secondary),
+                      title: const Text(
+                        'Logout',
+                        style: TextStyle(color: Brand.secondary, fontSize: 13),
+                      ),
+                      onTap: () async => app.logout(),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
 
+  Widget mobileHeader() => Container(
+    padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+    decoration: const BoxDecoration(
+      color: Brand.sidebar,
+      border: Border(bottom: BorderSide(color: Brand.border)),
+    ),
+    child: Row(
+      children: [
+        Builder(
+          builder: (context) => IconButton(
+            tooltip: 'Open navigation',
+            onPressed: () => Scaffold.of(context).openDrawer(),
+            icon: const Icon(Icons.menu, color: Brand.ink),
+          ),
+        ),
+        const SizedBox(width: 4),
+        const Expanded(
+          child: Text(
+            'Venture Plus',
+            style: TextStyle(
+              color: Brand.ink,
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        Text(
+          app.user!.role.label,
+          style: const TextStyle(color: Brand.secondary, fontSize: 12),
+        ),
+        IconButton(
+          tooltip: 'Profile and more screens',
+          onPressed: profile,
+          icon: const Icon(
+            Icons.account_circle_outlined,
+            color: Brand.secondary,
+          ),
+        ),
+      ],
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
-    final destination = destinations[selected];
-    final body = destination.$3 == null
-        ? DashboardPage(controller: app, onOpen: open)
-        : WorkflowPage(
-            key: ValueKey(destination.$3),
-            controller: app,
-            resource: destination.$3!,
-            title: destination.$1,
-            showModeIndicator: false,
-          );
-    return Scaffold(
-      body: SafeArea(
-        bottom: false,
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: Brand.gap,
-                vertical: Brand.compact,
-              ),
-              child: Row(
-                children: [
-                  const BrandLogo(height: 42),
-                  const SizedBox(width: Brand.compact),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+    final stressScale =
+        MediaQuery.textScalerOf(context).scale(14) > 20 ||
+        MediaQuery.sizeOf(context).width < 500;
+    return MediaQuery.withClampedTextScaling(
+      maxScaleFactor: 1.3,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final desktop = constraints.maxWidth >= Brand.tablet;
+          if (desktop) {
+            return Scaffold(
+              body: SafeArea(
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Row(
                       children: [
-                        Text(
-                          'Venture Plus',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        Text(
-                          '${app.user!.role.label} · ${app.isOffline ? 'Offline Demo' : 'Connected'}',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
+                        sidebar(),
+                        Expanded(child: pageBody()),
                       ],
                     ),
-                  ),
-                  IconButton(
-                    tooltip: 'Profile and more screens',
-                    onPressed: profile,
-                    icon: const Icon(Icons.account_circle_outlined),
-                  ),
+                    Positioned(
+                      left: 264,
+                      right: 0,
+                      bottom: 0,
+                      child: bottomNavigation(stressScale: stressScale),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+          return Scaffold(
+            bottomNavigationBar: bottomNavigation(stressScale: stressScale),
+            drawer: Drawer(width: 280, child: sidebar(closeOnSelect: true)),
+            body: SafeArea(
+              child: Column(
+                children: [
+                  mobileHeader(),
+                  if (app.isOffline) const _ModeBanner(),
+                  Expanded(child: pageBody()),
                 ],
               ),
             ),
-            if (app.isOffline)
-              Container(
-                width: double.infinity,
-                color: Brand.amberLight,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: Brand.gap,
-                  vertical: Brand.compact,
-                ),
-                child: const Text(
-                  'Offline Demo · Fictional data · Changes stay on this device',
-                  style: TextStyle(color: Brand.warning, fontSize: 12),
-                ),
-              ),
-            if (!app.isOffline && app.sessionWarning != null)
-              Semantics(
-                liveRegion: true,
-                child: Container(
-                  width: double.infinity,
-                  color: Brand.amberLight,
-                  padding: const EdgeInsets.all(Brand.gap),
-                  child: Text(app.sessionWarning!),
-                ),
-              ),
-            Expanded(
-              child: AnimatedSwitcher(
-                duration: MediaQuery.disableAnimationsOf(context)
-                    ? Duration.zero
-                    : Brand.transition,
-                child: body,
-              ),
-            ),
-          ],
-        ),
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: selected,
-        onDestinationSelected: (index) => setState(() => selected = index),
-        destinations: destinations
-            .map(
-              (item) =>
-                  NavigationDestination(icon: Icon(item.$2), label: item.$1),
-            )
-            .toList(),
+          );
+        },
       ),
     );
   }
+}
+
+class _ModeBanner extends StatelessWidget {
+  const _ModeBanner();
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    color: Brand.amberLight,
+    padding: const EdgeInsets.symmetric(
+      horizontal: Brand.gap,
+      vertical: Brand.compact,
+    ),
+    child: const Text(
+      'Offline Demo · Fictional data · Changes stay on this device',
+      style: TextStyle(color: Brand.warning, fontSize: 12),
+    ),
+  );
 }
 
 class PasswordPage extends StatefulWidget {

@@ -7,6 +7,8 @@ class FakeTransport implements ApiTransport {
   FakeTransport({this.handler});
   Future<JsonMap> Function(String, String, Object?, JsonMap)? handler;
   final calls = <String>[];
+  Object? lastData;
+  String? lastPath;
   int restores = 0;
   int clears = 0;
   @override
@@ -24,6 +26,8 @@ class FakeTransport implements ApiTransport {
     void Function(int, int)? onSendProgress,
   }) async {
     calls.add('$method $path');
+    lastPath = path;
+    lastData = data;
     if (handler == null) throw const AppFailure('Network unavailable.');
     return handler!(method, path, data, query);
   }
@@ -162,14 +166,22 @@ void main() {
     });
 
     test(
-      'identity comes from me, not login response or selected role',
+      'login sends expected role while me remains the identity authority',
       () async {
+        JsonMap? loginPayload;
         final transport = FakeTransport(
-          handler: (method, path, data, query) async => {
-            'success': true,
-            'data': {
-              'user': identity(path == '/auth/me' ? Role.employee : Role.admin),
-            },
+          handler: (method, path, data, query) async {
+            if (path == '/auth/login' && data is Map) {
+              loginPayload = Map<String, dynamic>.from(data);
+            }
+            return {
+              'success': true,
+              'data': {
+                'user': identity(
+                  path == '/auth/me' ? Role.employee : Role.admin,
+                ),
+              },
+            };
           },
         );
         final store = MemoryStore();
@@ -177,11 +189,51 @@ void main() {
           transport: transport,
           preferences: store,
         );
-        expect(await controller.login('test@example.test', 'password'), true);
+        expect(
+          await controller.login(
+            'test@example.test',
+            'password',
+            Role.employee,
+          ),
+          true,
+        );
         expect(controller.user!.role, Role.employee);
         expect(controller.repository!.isOffline, false);
         expect(transport.calls, ['POST /auth/login', 'GET /auth/me']);
+        expect(loginPayload?['expectedRole'], 'EMPLOYEE');
         expect(await store.read(AppController.modeKey), 'connected');
+        controller.dispose();
+      },
+    );
+
+    test(
+      'server rejects a role mismatch without publishing a session',
+      () async {
+        final transport = FakeTransport(
+          handler: (method, path, data, query) async {
+            final payload = data is Map ? data : const <Object?, Object?>{};
+            if (path == '/auth/login' && payload['expectedRole'] == 'ADMIN') {
+              throw const AppFailure('Sign-in failed.', statusCode: 401);
+            }
+            return <String, dynamic>{
+              'success': true,
+              'data': {'user': identity(Role.employee)},
+            };
+          },
+        );
+        final controller = AppController(
+          transport: transport,
+          preferences: MemoryStore(),
+        );
+
+        expect(
+          await controller.login('test@example.test', 'password', Role.admin),
+          false,
+        );
+        expect(controller.user, isNull);
+        expect(controller.repository, isNull);
+        expect(controller.mode, isNull);
+        expect(controller.error, 'Sign-in failed.');
         controller.dispose();
       },
     );

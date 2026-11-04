@@ -155,39 +155,44 @@ class AppController extends ChangeNotifier {
     }
   });
 
-  Future<bool> login(String email, String password) => _action(() async {
-    _clearIdentity();
-    if (!RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email.trim()) ||
-        password.length < 6) {
-      throw const AppFailure(
-        'Enter a valid email and a password with at least 6 characters.',
-      );
-    }
-    await preferences.remove(modeKey);
-    await transport.clear();
-    try {
-      await transport.request(
-        'POST',
-        '/auth/login',
-        data: {'email': email.trim(), 'password': password},
-      );
-      final response = await transport.request('GET', '/auth/me');
-      final identity = UserIdentity.fromJson(
-        jsonObject(jsonObject(response['data'])['user']),
-      );
-      await preferences.write(modeKey, SessionMode.connected.name);
-      user = identity;
-      mode = SessionMode.connected;
-      repository = ConnectedRepository(
-        transport,
-        identity,
-        onUnauthorized: _expired,
-      );
-    } on Object {
-      await transport.clear();
-      rethrow;
-    }
-  });
+  Future<bool> login(String email, String password, [Role? expectedRole]) =>
+      _action(() async {
+        _clearIdentity();
+        if (!RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email.trim()) ||
+            password.length < 6) {
+          throw const AppFailure(
+            'Enter a valid email and a password with at least 6 characters.',
+          );
+        }
+        await preferences.remove(modeKey);
+        await transport.clear();
+        try {
+          await transport.request(
+            'POST',
+            '/auth/login',
+            data: {
+              'email': email.trim(),
+              'password': password,
+              if (expectedRole != null) 'expectedRole': expectedRole.wireName,
+            },
+          );
+          final response = await transport.request('GET', '/auth/me');
+          final identity = UserIdentity.fromJson(
+            jsonObject(jsonObject(response['data'])['user']),
+          );
+          await preferences.write(modeKey, SessionMode.connected.name);
+          user = identity;
+          mode = SessionMode.connected;
+          repository = ConnectedRepository(
+            transport,
+            identity,
+            onUnauthorized: _expired,
+          );
+        } on Object {
+          await transport.clear();
+          rethrow;
+        }
+      });
 
   Future<bool> enterOffline(Role role) => _action(() async {
     final offline = await OfflineRepository.open(preferences, role);

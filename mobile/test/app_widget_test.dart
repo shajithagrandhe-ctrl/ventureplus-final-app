@@ -80,6 +80,24 @@ void main() {
     },
   );
 
+  testWidgets('selected portal is sent as the expected backend role', (
+    tester,
+  ) async {
+    final app = await start(tester);
+    await tester.tap(
+      find.text('Admin'),
+    ); // Select the role tab, not a demo button.
+    await tester.enterText(find.byKey(const Key('email')), 'test@example.test');
+    await tester.enterText(find.byKey(const Key('password')), 'long-password');
+    await tester.ensureVisible(find.byKey(const Key('sign-in')));
+    await tester.tap(find.byKey(const Key('sign-in')));
+    await tester.pumpAndSettle();
+
+    final transport = app.transport as FakeTransport;
+    expect(transport.lastPath, '/auth/login');
+    expect((transport.lastData as JsonMap)['expectedRole'], 'ADMIN');
+  });
+
   testWidgets('successful login uses the identity returned by me', (
     tester,
   ) async {

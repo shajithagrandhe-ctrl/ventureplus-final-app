@@ -43,6 +43,9 @@ class _VentureAppState extends State<VentureApp> {
         debugShowCheckedModeBanner: false,
         theme: Brand.theme,
         themeMode: ThemeMode.light,
+        builder: (context, child) => SizedBox.expand(
+          child: AppBackground(child: child ?? const SizedBox()),
+        ),
         home: !ready
             ? const StartupPage()
             : PickerRecoveryHost(

@@ -2,6 +2,32 @@ import 'package:flutter/material.dart';
 
 import 'theme.dart';
 
+class AppBackground extends StatelessWidget {
+  const AppBackground({super.key, required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Stack(
+    fit: StackFit.expand,
+    children: [
+      ExcludeSemantics(
+        child: Image.asset('assets/background/plot-bg.jpg', fit: BoxFit.cover),
+      ),
+      const ColoredBox(color: Color(0xB8141A26)),
+      const DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0x442563EB), Color(0x00141A26), Color(0x55202A47)],
+          ),
+        ),
+      ),
+      Positioned.fill(child: child),
+    ],
+  );
+}
+
 class BrandLogo extends StatelessWidget {
   const BrandLogo({super.key, this.height = 64});
   final double height;
@@ -22,7 +48,13 @@ class PageBody extends StatelessWidget {
     alignment: Alignment.topCenter,
     child: ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: Brand.maxWidth),
-      child: Padding(padding: const EdgeInsets.all(Brand.gutter), child: child),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: Brand.gutter,
+          vertical: Brand.gap,
+        ),
+        child: child,
+      ),
     ),
   );
 }
@@ -112,6 +144,9 @@ class StatusBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: pending ? Brand.amberLight : Brand.sage100,
         borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: pending ? Brand.amber.withValues(alpha: .8) : Brand.sage100,
+        ),
       ),
       child: Text(
         label.replaceAll('_', ' ').toLowerCase(),
