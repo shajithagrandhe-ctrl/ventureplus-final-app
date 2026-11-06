@@ -160,7 +160,6 @@ class _AppShellState extends State<AppShell> {
                   : null,
               selectedIndex: selected,
               onDestinationSelected: (index) {
-                if (stressScale) return;
                 setState(() => selected = index);
               },
               destinations: [

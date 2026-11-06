@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/app_controller.dart';
 import '../../ui/components.dart';
 import '../../ui/theme.dart';
+import '../insights/insights_page.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({
@@ -270,6 +271,53 @@ class _DashboardPageState extends State<DashboardPage> {
                           'Customer records',
                         ),
                       ),
+                    const SizedBox(height: Brand.gap),
+                    Wrap(
+                      spacing: Brand.compact,
+                      runSpacing: Brand.compact,
+                      children: [
+                        if (admin || app.user!.role == Role.employee)
+                          OutlinedButton.icon(
+                            onPressed: () => Navigator.push<void>(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => InsightsPage(
+                                  controller: app,
+                                  mode: InsightMode.reports,
+                                ),
+                              ),
+                            ),
+                            icon: const Icon(Icons.bar_chart_outlined),
+                            label: const Text('Reports'),
+                          ),
+                        OutlinedButton.icon(
+                          onPressed: () => Navigator.push<void>(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => InsightsPage(
+                                controller: app,
+                                mode: InsightMode.totalData,
+                              ),
+                            ),
+                          ),
+                          icon: const Icon(Icons.dataset_outlined),
+                          label: const Text('Total data'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: () => Navigator.push<void>(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => InsightsPage(
+                                controller: app,
+                                mode: InsightMode.tracking,
+                              ),
+                            ),
+                          ),
+                          icon: const Icon(Icons.track_changes_outlined),
+                          label: const Text('Tracking'),
+                        ),
+                      ],
+                    ),
                   ],
                   if (admin && section == 1) ...[
                     metrics([

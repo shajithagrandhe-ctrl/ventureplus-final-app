@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ventureplus/app.dart';
 import 'package:ventureplus/core/app_controller.dart';
 import 'package:ventureplus/features/auth/login_page.dart';
+import 'package:ventureplus/features/insights/insights_page.dart';
 import 'package:ventureplus/features/shell/shell.dart';
 
 import 'core_data_test.dart' show FakeTransport, identity;
@@ -98,6 +99,20 @@ void main() {
     expect((transport.lastData as JsonMap)['expectedRole'], 'ADMIN');
   });
 
+  testWidgets('admin dashboard opens role-scoped insights', (tester) async {
+    final app = await start(tester, role: Role.admin);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: InsightsPage(controller: app, mode: InsightMode.reports),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(InsightsPage), findsOneWidget);
+    expect(find.text('Reports & performance'), findsOneWidget);
+    expect(find.text('Recent activity'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('successful login uses the identity returned by me', (
     tester,
   ) async {
@@ -174,6 +189,9 @@ void main() {
         await tester.tap(find.byType(NavigationDestination).at(1));
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
+        if (size.width == 360) {
+          expect(find.text('My properties'), findsWidgets);
+        }
       },
     );
   }
