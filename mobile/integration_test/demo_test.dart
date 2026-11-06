@@ -19,6 +19,16 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  Future<void> waitForAuthState(WidgetTester tester, AppController app) async {
+    for (var tick = 0; tick < 60 && app.busy; tick++) {
+      await tester.pump(const Duration(milliseconds: 500));
+    }
+    await tester.pumpAndSettle();
+  }
+
+  Finder demoPrefill(Role role) =>
+      find.byKey(ValueKey('demo-prefill-${role.wireName}'));
+
   if (live) {
     for (final role in [Role.admin, Role.employee, Role.customer]) {
       testWidgets(
@@ -30,9 +40,10 @@ void main() {
             VentureApp(controller: app, restoreSession: false),
           );
           await tester.pumpAndSettle();
-          await tap(tester, find.text('Sign in as ${role.label}'));
+          await tap(tester, demoPrefill(role));
           expect(app.user, isNull);
           await tap(tester, find.byKey(const Key('sign-in')));
+          await waitForAuthState(tester, app);
           expect(app.user?.role, role, reason: app.error);
           expect(app.mode, SessionMode.connected);
           final restored = await AppController.create();
@@ -47,6 +58,58 @@ void main() {
         },
       );
     }
+
+    testWidgets('native Employee login passes five consecutive attempts', (
+      tester,
+    ) async {
+      for (var attempt = 1; attempt <= 5; attempt++) {
+        final app = await AppController.create();
+        await app.logout();
+        await tester.pumpWidget(
+          VentureApp(controller: app, restoreSession: false),
+        );
+        await tester.pumpAndSettle();
+        await tap(tester, demoPrefill(Role.employee));
+        await tap(tester, find.byKey(const Key('sign-in')));
+        await waitForAuthState(tester, app);
+        expect(
+          app.user?.role,
+          Role.employee,
+          reason: 'Employee attempt $attempt failed: ${app.error}',
+        );
+        await app.logout();
+        app.dispose();
+      }
+    });
+
+    testWidgets(
+      'native multi-role sequence preserves each authenticated role',
+      (tester) async {
+        for (final role in [
+          Role.admin,
+          Role.employee,
+          Role.customer,
+          Role.employee,
+        ]) {
+          final app = await AppController.create();
+          await app.logout();
+          await tester.pumpWidget(
+            VentureApp(controller: app, restoreSession: false),
+          );
+          await tester.pumpAndSettle();
+          await tap(tester, demoPrefill(role));
+          await tap(tester, find.byKey(const Key('sign-in')));
+          await waitForAuthState(tester, app);
+          expect(
+            app.user?.role,
+            role,
+            reason: 'Sequence failed for ${role.label}.',
+          );
+          await app.logout();
+          app.dispose();
+        }
+      },
+    );
   } else {
     testWidgets('offline entry and all role destinations run without network', (
       tester,

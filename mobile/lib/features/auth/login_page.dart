@@ -347,6 +347,7 @@ class _LoginPageState extends State<LoginPage> {
               children: [
                 for (final role in [Role.admin, Role.employee, Role.customer])
                   OutlinedButton(
+                    key: ValueKey('demo-prefill-${role.wireName}'),
                     onPressed: widget.controller.busy
                         ? null
                         : () => prefill(role),
