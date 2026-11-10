@@ -24,9 +24,11 @@ class _DashboardPageState extends State<DashboardPage> {
       employees = [],
       locations = [],
       ventures = [];
-  bool loading = true;
-  String? error;
+  List<JsonMap> bookings = [], payments = [];
+  bool loading = true, secondaryLoading = false;
+  String? error, secondaryError;
   int section = 0;
+  int _generation = 0;
   @override
   void initState() {
     super.initState();
@@ -34,37 +36,65 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> refresh() async {
+    final generation = ++_generation;
     setState(() {
       loading = true;
+      secondaryLoading = true;
       error = null;
+      secondaryError = null;
     });
     try {
       final repo = widget.controller.repository!;
       final role = widget.controller.user!.role;
-      final values = await Future.wait([
+      // Inventory is enough to paint the first dashboard frame. Secondary
+      // lists continue in parallel afterwards so a slow report endpoint does
+      // not block the role-specific shell.
+      final critical = await Future.wait([
         repo.list(Resource.plots),
+        repo.list(Resource.locations),
+        repo.list(Resource.ventures),
+      ]);
+      if (!mounted || generation != _generation) return;
+      setState(() {
+        plots = critical[0];
+        locations = critical[1];
+        ventures = critical[2];
+        loading = false;
+      });
+      final values = await Future.wait([
         repo.list(Resource.customers),
         repo.list(Resource.leads),
         Permissions.canRead(role, Resource.employees)
             ? repo.list(Resource.employees)
             : Future.value(<JsonMap>[]),
-        repo.list(Resource.locations),
-        repo.list(Resource.ventures),
       ]);
-      if (mounted) {
+      final extraBookings = repo is OfflineRepository
+          ? repo.demoRows('bookings')
+          : const <JsonMap>[];
+      final extraPayments = repo is OfflineRepository
+          ? repo.demoRows('payments')
+          : const <JsonMap>[];
+      if (mounted && generation == _generation) {
         setState(() {
-          plots = values[0];
-          records = values[1];
-          leads = values[2];
-          employees = values[3];
-          locations = values[4];
-          ventures = values[5];
+          records = values[0];
+          leads = values[1];
+          employees = values[2];
+          bookings = extraBookings;
+          payments = extraPayments;
+          secondaryLoading = false;
         });
       }
     } catch (e) {
-      if (mounted) setState(() => error = e.toString());
-    } finally {
-      if (mounted) setState(() => loading = false);
+      if (mounted && generation == _generation) {
+        if (loading) {
+          error = e.toString();
+          loading = false;
+        } else {
+          secondaryError = e.toString();
+        }
+        secondaryLoading = false;
+        setState(() {});
+      }
     }
   }
 
@@ -241,7 +271,33 @@ class _DashboardPageState extends State<DashboardPage> {
                             ? '${employees.length}'
                             : '${records.where((r) => r['status'] == 'FOLLOWING_UP').length}',
                       ),
+                      if (app.isOffline) ...[
+                        ('Bookings', '${bookings.length}'),
+                        (
+                          'Collected',
+                          money(
+                            payments.fold<num>(
+                              0,
+                              (sum, row) =>
+                                  sum + ((row['amount'] as num?) ?? 0),
+                            ),
+                          ),
+                        ),
+                      ],
                     ]),
+                    if (secondaryLoading)
+                      const Padding(
+                        padding: EdgeInsets.only(top: Brand.compact),
+                        child: LinearProgressIndicator(minHeight: 2),
+                      ),
+                    if (secondaryError != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: Brand.compact),
+                        child: Text(
+                          'Some secondary activity is unavailable: $secondaryError',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
                     const SizedBox(height: Brand.gap),
                     OutlinedButton.icon(
                       onPressed: () => widget.onOpen(

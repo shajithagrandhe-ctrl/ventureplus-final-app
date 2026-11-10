@@ -109,6 +109,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(InsightsPage), findsOneWidget);
     expect(find.text('Reports & performance'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('Recent activity'), 300);
     expect(find.text('Recent activity'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

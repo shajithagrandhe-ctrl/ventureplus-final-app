@@ -20,7 +20,9 @@ class OfflineRepository implements VentureRepository {
 
   static Future<OfflineRepository> open(KeyValueStore store, Role role) async {
     final saved = await store.read(storageKey);
-    final data = saved == null ? seedDemoData() : jsonObject(jsonDecode(saved));
+    final data = saved == null
+        ? seedDemoData()
+        : mergeDemoData(jsonObject(jsonDecode(saved)));
     if (data['version'] != 1) {
       throw const AppFailure('This saved demo uses an unsupported format.');
     }
@@ -59,8 +61,44 @@ class OfflineRepository implements VentureRepository {
         );
       }
     }
-    if (saved == null) await store.write(storageKey, jsonEncode(data));
+    if (saved == null || jsonEncode(data) != saved) {
+      await store.write(storageKey, jsonEncode(data));
+    }
     return OfflineRepository._(store, identity, data);
+  }
+
+  /// Returns local-only presentation fixtures. Connected repositories never
+  /// expose these tables, so demo transactions cannot leak into API mode.
+  List<JsonMap> demoRows(String table) {
+    var rows = _rows(table);
+    if (table == 'bookings') {
+      final visibleCustomers = _customers().map((row) => row['id']).toSet();
+      rows = rows
+          .where((row) => visibleCustomers.contains(row['customerId']))
+          .toList();
+    } else if (table == 'payments') {
+      final visibleBookings = demoRows('bookings')
+          .map((row) => row['id'])
+          .toSet();
+      rows = rows
+          .where((row) => visibleBookings.contains(row['bookingId']))
+          .toList();
+    } else if (table == 'activities' && user.role != Role.admin) {
+      final visibleNames = _customers()
+          .map((row) => row['contactName'])
+          .whereType<String>()
+          .toSet();
+      rows = rows
+          .where(
+            (row) =>
+                row['actor'] == user.fullName ||
+                visibleNames.any(
+                  (name) => '${row['detail'] ?? ''}'.contains(name),
+                ),
+          )
+          .toList();
+    }
+    return rows.map(_copy).toList(growable: false);
   }
 
   List<JsonMap> _rows(String name, [JsonMap? data]) =>

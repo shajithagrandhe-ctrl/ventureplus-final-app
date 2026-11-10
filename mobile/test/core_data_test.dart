@@ -378,7 +378,7 @@ void main() {
       expect(employee.user.email, 'employee@fictional.example');
       expect(employee.user.role, Role.employee);
       final records = await employee.list(Resource.customers);
-      expect(records.length, 3);
+      expect(records.length, 5);
       expect(
         records.every((record) => record['recordOwner'] == employee.user.email),
         true,
@@ -417,7 +417,7 @@ void main() {
         expect(employee.user.email, 'employee@fictional.example');
         expect(
           (await employee.list(Resource.customers)).map((row) => row['id']),
-          ['demo-record-1'],
+          containsAll(['demo-record-1', 'demo-record-3', 'demo-record-4']),
         );
       },
     );
@@ -461,7 +461,7 @@ void main() {
         final customer = await OfflineRepository.open(store, Role.customer);
         expect(
           (await customer.list(Resource.customers)).map((row) => row['id']),
-          ['demo-record-1'],
+          containsAll(['demo-record-1', 'demo-record-3', 'demo-record-4']),
         );
       },
     );
@@ -488,15 +488,19 @@ void main() {
     });
     test('customer sees own lead-linked properties and records only', () async {
       final repo = await OfflineRepository.open(MemoryStore(), Role.customer);
-      expect((await repo.list(Resource.plots)).map((r) => r['id']), [
-        'demo-plot-1',
-      ]);
-      expect((await repo.list(Resource.customers)).map((r) => r['id']), [
-        'demo-record-1',
-      ]);
-      expect((await repo.list(Resource.leads)).map((r) => r['email']), [
-        'customer@fictional.example',
-      ]);
+      expect(
+        (await repo.list(Resource.plots)).map((r) => r['id']),
+        containsAll(['demo-plot-1', 'demo-plot-2', 'demo-plot-3']),
+      );
+      expect(
+        (await repo.list(Resource.customers)).map((r) => r['id']),
+        containsAll(['demo-record-1', 'demo-record-3', 'demo-record-4']),
+      );
+      expect(
+        (await repo.list(Resource.leads)).map((r) => r['email']),
+        everyElement('customer@fictional.example'),
+      );
+      expect((await repo.list(Resource.leads)).length, 3);
       await expectLater(
         repo.detail(Resource.plots, 'demo-plot-9'),
         throwsA(isA<AppFailure>()),
@@ -508,13 +512,50 @@ void main() {
       expect(repo.assetUrl('https://example.test/image.png'), isNull);
     });
 
+    test(
+      'demo transactions and activities are linked and role scoped',
+      () async {
+        final admin = await OfflineRepository.open(MemoryStore(), Role.admin);
+        final bookings = admin.demoRows('bookings');
+        final payments = admin.demoRows('payments');
+        final activities = admin.demoRows('activities');
+        expect(bookings, hasLength(2));
+        expect(payments, hasLength(2));
+        expect(activities, hasLength(3));
+        expect(
+          bookings.every(
+            (booking) => payments.any(
+              (payment) => payment['bookingId'] == booking['id'],
+            ),
+          ),
+          isTrue,
+        );
+        expect(
+          bookings.every((booking) => booking['customerId'] != null),
+          isTrue,
+        );
+
+        final customer = await OfflineRepository.open(
+          MemoryStore(),
+          Role.customer,
+        );
+        expect(customer.demoRows('bookings'), hasLength(1));
+        expect(customer.demoRows('payments'), hasLength(1));
+        expect(
+          customer.demoRows('bookings').single['customerName'],
+          'Riya Shah',
+        );
+      },
+    );
+
     test('employee assignment bounds plot writes and local records', () async {
       final repo = await OfflineRepository.open(MemoryStore(), Role.employee);
       expect((await repo.list(Resource.plots)).length, 8);
-      expect((await repo.list(Resource.customers)).length, 1);
-      expect((await repo.list(Resource.leads)).map((row) => row['id']), [
-        'demo-lead-1',
-      ]);
+      expect((await repo.list(Resource.customers)).length, 3);
+      expect(
+        (await repo.list(Resource.leads)).map((row) => row['id']),
+        containsAll(['demo-lead-1', 'demo-lead-3', 'demo-lead-4']),
+      );
       await expectLater(
         repo.update(Resource.leads, 'demo-lead-2', {'status': 'WON'}),
         throwsA(isA<AppFailure>()),

@@ -107,7 +107,7 @@ class _AppShellState extends State<AppShell> {
                 style: const TextStyle(color: Brand.ink),
               ),
               subtitle: Text(
-                app.user!.email,
+                '${app.user!.email}\n${app.user!.role.label} · ${app.isOffline ? 'Fictional local profile' : 'Verified server identity'}',
                 style: const TextStyle(color: Brand.secondary),
               ),
             ),

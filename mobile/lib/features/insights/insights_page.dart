@@ -20,6 +20,7 @@ class _InsightsPageState extends State<InsightsPage> {
   bool loading = true;
   String? error;
   Map<Resource, List<JsonMap>> data = {};
+  List<JsonMap> bookings = [], payments = [], activities = [];
 
   @override
   void initState() {
@@ -47,11 +48,23 @@ class _InsightsPageState extends State<InsightsPage> {
       final values = await Future.wait(
         resources.map((resource) => repository.list(resource)),
       );
+      final demoBookings = repository is OfflineRepository
+          ? repository.demoRows('bookings')
+          : const <JsonMap>[];
+      final demoPayments = repository is OfflineRepository
+          ? repository.demoRows('payments')
+          : const <JsonMap>[];
+      final demoActivities = repository is OfflineRepository
+          ? repository.demoRows('activities')
+          : const <JsonMap>[];
       if (!mounted) return;
       setState(() {
         data = {
           for (var i = 0; i < resources.length; i++) resources[i]: values[i],
         };
+        bookings = demoBookings;
+        payments = demoPayments;
+        activities = demoActivities;
       });
     } catch (e) {
       if (mounted) setState(() => error = e.toString());
@@ -77,6 +90,9 @@ class _InsightsPageState extends State<InsightsPage> {
           ? 'Simulated demo updates only; no device location is transmitted.'
           : 'Customer and employee tracking updates visible to your role.',
   };
+
+  String money(num value) =>
+      '₹${value.toStringAsFixed(0).replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+$)'), (m) => '${m[1]},')}';
 
   Widget metric(BuildContext context, String label, String value) => Expanded(
     child: Card(
@@ -166,6 +182,25 @@ class _InsightsPageState extends State<InsightsPage> {
                   metric(context, 'Leads', '${rows(Resource.leads).length}'),
                 ],
               ),
+              if (widget.controller.isOffline) ...[
+                const SizedBox(height: Brand.compact),
+                Row(
+                  children: [
+                    metric(context, 'Bookings', '${bookings.length}'),
+                    const SizedBox(width: Brand.compact),
+                    metric(
+                      context,
+                      'Collected',
+                      money(
+                        payments.fold<num>(
+                          0,
+                          (sum, row) => sum + ((row['amount'] as num?) ?? 0),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
               const SizedBox(height: Brand.gap),
               if (widget.mode != InsightMode.tracking)
                 section(context, 'Plot availability', [
@@ -187,17 +222,43 @@ class _InsightsPageState extends State<InsightsPage> {
                 ]),
               if (widget.mode == InsightMode.reports)
                 section(context, 'Recent activity', [
-                  for (final row in rows(Resource.leads).take(5))
+                  for (final row
+                      in (widget.controller.isOffline
+                              ? activities
+                              : rows(Resource.leads))
+                          .take(5))
                     ListTile(
                       contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.person_add_alt_outlined),
-                      title: Text('${row['customerName'] ?? 'Lead'}'),
+                      leading: Icon(
+                        row['kind'] == 'PAYMENT'
+                            ? Icons.payments_outlined
+                            : Icons.person_add_alt_outlined,
+                      ),
+                      title: Text(
+                        '${row['title'] ?? row['customerName'] ?? 'Lead'}',
+                      ),
                       subtitle: Text(
-                        '${row['status'] ?? 'NEW'} · ${row['location'] ?? ''}',
+                        '${row['detail'] ?? row['status'] ?? 'NEW'} · ${row['date'] ?? row['location'] ?? ''}',
                       ),
                     ),
-                  if (rows(Resource.leads).isEmpty)
+                  if ((widget.controller.isOffline
+                          ? activities
+                          : rows(Resource.leads))
+                      .isEmpty)
                     const Text('No lead activity is available for this role.'),
+                  if (widget.controller.isOffline) ...[
+                    const Divider(),
+                    for (final row in bookings.take(3))
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.event_available_outlined),
+                        title: Text('${row['property'] ?? 'Booking'}'),
+                        subtitle: Text(
+                          '${row['customerName'] ?? ''} · ${row['status'] ?? ''}',
+                        ),
+                        trailing: Text(money((row['amount'] as num?) ?? 0)),
+                      ),
+                  ],
                 ]),
               if (widget.mode == InsightMode.totalData)
                 section(context, 'Records by area', [
@@ -207,6 +268,10 @@ class _InsightsPageState extends State<InsightsPage> {
                     ('Plots', rows(Resource.plots).length),
                     ('Customers', rows(Resource.customers).length),
                     ('Leads', rows(Resource.leads).length),
+                    if (widget.controller.isOffline)
+                      ('Bookings', bookings.length),
+                    if (widget.controller.isOffline)
+                      ('Payments', payments.length),
                   ])
                     ListTile(
                       contentPadding: EdgeInsets.zero,
