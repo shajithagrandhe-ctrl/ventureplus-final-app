@@ -24,7 +24,7 @@ class _DashboardPageState extends State<DashboardPage> {
       employees = [],
       locations = [],
       ventures = [];
-  List<JsonMap> bookings = [], payments = [];
+  List<JsonMap> bookings = [], payments = [], inquiries = [];
   bool loading = true, secondaryLoading = false;
   String? error, secondaryError;
   int section = 0;
@@ -46,41 +46,50 @@ class _DashboardPageState extends State<DashboardPage> {
     try {
       final repo = widget.controller.repository!;
       final role = widget.controller.user!.role;
-      // Inventory is enough to paint the first dashboard frame. Secondary
-      // lists continue in parallel afterwards so a slow report endpoint does
-      // not block the role-specific shell.
-      final critical = await Future.wait([
-        repo.list(Resource.plots),
+      // Start every independent read together, but only wait for plots before
+      // painting the first dashboard frame. Location, venture and activity
+      // lists continue in the background and update the dashboard when ready.
+      // This keeps a slow secondary endpoint from delaying the first useful
+      // screen after authentication.
+      final plotsFuture = repo.list(Resource.plots);
+      final secondaryFuture = Future.wait<List<JsonMap>>([
         repo.list(Resource.locations),
         repo.list(Resource.ventures),
-      ]);
-      if (!mounted || generation != _generation) return;
-      setState(() {
-        plots = critical[0];
-        locations = critical[1];
-        ventures = critical[2];
-        loading = false;
-      });
-      final values = await Future.wait([
         repo.list(Resource.customers),
         repo.list(Resource.leads),
         Permissions.canRead(role, Resource.employees)
             ? repo.list(Resource.employees)
             : Future.value(<JsonMap>[]),
       ]);
+      // Keep a listener attached even if the page is disposed while the
+      // critical plots request is still in flight.
+      secondaryFuture.catchError((_) => <List<JsonMap>>[]);
+      final criticalPlots = await plotsFuture;
+      if (!mounted || generation != _generation) return;
+      setState(() {
+        plots = criticalPlots;
+        loading = false;
+      });
+      final values = await secondaryFuture;
       final extraBookings = repo is OfflineRepository
           ? repo.demoRows('bookings')
           : const <JsonMap>[];
       final extraPayments = repo is OfflineRepository
           ? repo.demoRows('payments')
           : const <JsonMap>[];
+      final extraInquiries = repo is OfflineRepository
+          ? repo.demoRows('inquiries')
+          : const <JsonMap>[];
       if (mounted && generation == _generation) {
         setState(() {
-          records = values[0];
-          leads = values[1];
-          employees = values[2];
+          locations = values[0];
+          ventures = values[1];
+          records = values[2];
+          leads = values[3];
+          employees = values[4];
           bookings = extraBookings;
           payments = extraPayments;
+          inquiries = extraInquiries;
           secondaryLoading = false;
         });
       }
@@ -273,6 +282,7 @@ class _DashboardPageState extends State<DashboardPage> {
                       ),
                       if (app.isOffline) ...[
                         ('Bookings', '${bookings.length}'),
+                        ('Enquiries', '${inquiries.length}'),
                         (
                           'Collected',
                           money(

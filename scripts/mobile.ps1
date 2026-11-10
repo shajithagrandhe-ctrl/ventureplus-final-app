@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('run', 'build', 'release', 'demo-release', 'analyze', 'test', 'offline-test', 'workflow-test', 'tablet-test', 'live-auth-test', 'restart-test')]
+    [ValidateSet('run', 'build', 'demo-build', 'release', 'demo-release', 'analyze', 'test', 'offline-test', 'workflow-test', 'tablet-test', 'live-auth-test', 'restart-test')]
     [string]$Action = 'run',
     [string]$FlutterPath = '',
     [string]$Device = 'emulator-5554',
@@ -29,8 +29,9 @@ try {
     switch ($Action) {
         'run' { & $FlutterPath run -d $Device @defines }
         'build' { & $FlutterPath build apk --debug @defines }
+        'demo-build' { & $FlutterPath build apk --debug @defines --dart-define=ENABLE_AUTHENTICATED_DEMO=true }
         'release' { & $FlutterPath build apk --release --dart-define=ENABLE_DEMO_PREFILLS=false "--dart-define=API_BASE_URL=$ApiBaseUrl" }
-        'demo-release' { & $FlutterPath build apk --release @defines }
+        'demo-release' { & $FlutterPath build apk --release @defines --dart-define=ENABLE_AUTHENTICATED_DEMO=true }
         'analyze' { & $FlutterPath analyze }
         'test' { & $FlutterPath test }
         'offline-test' { & $FlutterPath drive -d $Device --keep-app-running --driver=test_driver/integration_test.dart --target=integration_test/demo_test.dart @defines }

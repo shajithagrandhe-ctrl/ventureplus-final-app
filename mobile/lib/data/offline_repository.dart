@@ -8,18 +8,55 @@ import 'repository.dart';
 import 'storage.dart';
 
 class OfflineRepository implements VentureRepository {
-  OfflineRepository._(this.store, this.user, this._data);
+  OfflineRepository._(
+    this.store,
+    this.user,
+    this._data,
+    this.dataKey,
+    this._scopeUser,
+  );
   static const storageKey = 'ventureplus.offline.v1';
+  static const authenticatedDemoStorageKey =
+      'ventureplus.authenticated-demo.v1';
   final KeyValueStore store;
   @override
   final UserIdentity user;
+  final String dataKey;
+  final UserIdentity _scopeUser;
   JsonMap _data;
   bool _writing = false;
   @override
   bool get isOffline => true;
 
-  static Future<OfflineRepository> open(KeyValueStore store, Role role) async {
-    final saved = await store.read(storageKey);
+  static Future<OfflineRepository> open(KeyValueStore store, Role role) =>
+      _open(
+        store,
+        demoIdentity(role),
+        storageKey,
+        scopeUser: demoIdentity(role),
+        validateStoredIdentity: true,
+      );
+
+  /// Authenticates against the real backend but uses a separate local demo
+  /// store for all subsequent reads and writes in an explicitly demo build.
+  static Future<OfflineRepository> openForIdentity(
+    KeyValueStore store,
+    UserIdentity identity,
+  ) => _open(
+    store,
+    identity,
+    authenticatedDemoStorageKey,
+    scopeUser: demoIdentity(identity.role),
+  );
+
+  static Future<OfflineRepository> _open(
+    KeyValueStore store,
+    UserIdentity requestedIdentity,
+    String dataKey, {
+    required UserIdentity scopeUser,
+    bool validateStoredIdentity = false,
+  }) async {
+    final saved = await store.read(dataKey);
     final data = saved == null
         ? seedDemoData()
         : mergeDemoData(jsonObject(jsonDecode(saved)));
@@ -41,19 +78,19 @@ class OfflineRepository implements VentureRepository {
       jsonList(data[key]);
     }
     final users = jsonList(data['users'])
-        .where((u) => u['id'] == demoIdentity(role).id)
+        .where((u) => u['id'] == scopeUser.id)
         .toList();
     if (users.length != 1) {
       throw const AppFailure('The saved demo identity is missing or invalid.');
     }
-    final identity = UserIdentity.fromJson(users.single);
-    if (identity.role != role) {
+    final storedIdentity = UserIdentity.fromJson(users.single);
+    if (storedIdentity.role != requestedIdentity.role) {
       throw const AppFailure(
         'The saved demo identity does not match the selected role.',
         statusCode: 403,
       );
     }
-    if (role == Role.employee) {
+    if (validateStoredIdentity && requestedIdentity.role == Role.employee) {
       if (jsonObject(users.single['employeeProfile'])['status'] == 'FROZEN') {
         throw const AppFailure(
           'This offline employee is frozen. Choose Admin to reactivate it.',
@@ -62,9 +99,15 @@ class OfflineRepository implements VentureRepository {
       }
     }
     if (saved == null || jsonEncode(data) != saved) {
-      await store.write(storageKey, jsonEncode(data));
+      await store.write(dataKey, jsonEncode(data));
     }
-    return OfflineRepository._(store, identity, data);
+    return OfflineRepository._(
+      store,
+      validateStoredIdentity ? storedIdentity : requestedIdentity,
+      data,
+      dataKey,
+      scopeUser,
+    );
   }
 
   /// Returns local-only presentation fixtures. Connected repositories never
@@ -91,12 +134,30 @@ class OfflineRepository implements VentureRepository {
       rows = rows
           .where(
             (row) =>
-                row['actor'] == user.fullName ||
+                _matchesName(row['actor']) ||
                 visibleNames.any(
                   (name) => '${row['detail'] ?? ''}'.contains(name),
                 ),
           )
           .toList();
+    } else if (table == 'inquiries') {
+      final visibleEmails = _customers()
+          .map((row) => row['customerEmail'])
+          .whereType<String>()
+          .toSet();
+      if (user.role == Role.customer) {
+        rows = rows
+            .where((row) => _matchesEmail(row['customerEmail']))
+            .toList();
+      } else if (user.role == Role.employee) {
+        rows = rows
+            .where(
+              (row) =>
+                  _matchesEmail(row['assignedTo']) ||
+                  visibleEmails.contains(row['customerEmail']),
+            )
+            .toList();
+      }
     }
     return rows.map(_copy).toList(growable: false);
   }
@@ -106,6 +167,18 @@ class OfflineRepository implements VentureRepository {
       ? ((data ?? _data)[name] as List).cast<JsonMap>()
       : <JsonMap>[];
   JsonMap _copy(JsonMap value) => jsonObject(jsonDecode(jsonEncode(value)));
+  Set<String> get _emailAliases => {user.email, _scopeUser.email};
+  Set<String> get _nameAliases => {
+    user.fullName,
+    user.displayName,
+    _scopeUser.fullName,
+    _scopeUser.displayName,
+  };
+  Set<String> get _userIdAliases => {user.id, _scopeUser.id};
+  bool _matchesEmail(Object? value) =>
+      value is String && _emailAliases.contains(value);
+  bool _matchesName(Object? value) =>
+      value is String && _nameAliases.contains(value);
   String _id(String prefix) =>
       '$prefix-${DateTime.now().microsecondsSinceEpoch}-${Random().nextInt(10000)}';
   String get _now => DateTime.now().toUtc().toIso8601String();
@@ -124,7 +197,7 @@ class OfflineRepository implements VentureRepository {
     try {
       final next = _copy(_data);
       final result = action(next);
-      await store.write(storageKey, jsonEncode(next));
+      await store.write(dataKey, jsonEncode(next));
       _data = next;
       return result;
     } finally {
@@ -136,7 +209,7 @@ class OfflineRepository implements VentureRepository {
     final data = source ?? _data;
     if (user.role == Role.customer) {
       final ids = _rows('leads', data)
-          .where((lead) => lead['email'] == user.email)
+          .where((lead) => _matchesEmail(lead['email']))
           .map((lead) => lead['plotId'])
           .toSet();
       return _rows('plots', data)
@@ -146,7 +219,7 @@ class OfflineRepository implements VentureRepository {
     }
     if (user.role == Role.employee) {
       final profile = jsonObject(
-        _find('users', user.id, data)['employeeProfile'],
+        _find('users', _scopeUser.id, data)['employeeProfile'],
       );
       if (profile['status'] == 'FROZEN') return {};
       final locations = (profile['assignedLocationIds'] as List? ?? []).toSet();
@@ -164,7 +237,7 @@ class OfflineRepository implements VentureRepository {
     final data = source ?? _data;
     final ventures = _visibleVentureIds(data);
     final own = _rows('leads', data)
-        .where((lead) => lead['email'] == user.email)
+        .where((lead) => _matchesEmail(lead['email']))
         .map((lead) => lead['plotId'])
         .toSet();
     return _rows('plots', data)
@@ -179,18 +252,12 @@ class OfflineRepository implements VentureRepository {
   List<JsonMap> _customers([JsonMap? source]) => _rows('customers', source)
       .where(
         (c) => switch (user.role) {
-          Role.customer => c['customerEmail'] == user.email,
+          Role.customer => _matchesEmail(c['customerEmail']),
           Role.employee =>
-            [
-                  user.fullName,
-                  user.displayName,
-                  user.email,
-                ].contains(c['recordOwner']) ||
-                [
-                  user.fullName,
-                  user.displayName,
-                  user.email,
-                ].contains(c['leadName']),
+            _matchesName(c['recordOwner']) ||
+                _matchesName(c['leadName']) ||
+                _matchesEmail(c['recordOwner']) ||
+                _matchesEmail(c['leadName']),
           _ => true,
         },
       )
@@ -208,7 +275,7 @@ class OfflineRepository implements VentureRepository {
           .where(
             (lead) =>
                 lead['plotId'] == plot['id'] &&
-                (user.role != Role.customer || lead['email'] == user.email),
+                (user.role != Role.customer || _matchesEmail(lead['email'])),
           )
           .toList(),
     };
@@ -222,6 +289,19 @@ class OfflineRepository implements VentureRepository {
         .map(_decoratePlot)
         .toList(),
   };
+
+  JsonMap _decorateUser(JsonMap user) {
+    final profileKey = switch (user['role']) {
+      'ADMIN' => 'adminProfile',
+      'CUSTOMER' => 'customerProfile',
+      'AGENT' => 'agentProfile',
+      _ => 'employeeProfile',
+    };
+    final profile = user[profileKey] is Map
+        ? jsonObject(user[profileKey])
+        : const <String, dynamic>{};
+    return {...user, ...profile};
+  }
 
   @override
   Future<List<JsonMap>> list(
@@ -281,7 +361,7 @@ class OfflineRepository implements VentureRepository {
             .where(
               (l) =>
                   visiblePlots.any((p) => p['id'] == l['plotId']) &&
-                  (user.role != Role.customer || l['email'] == user.email),
+                  (user.role != Role.customer || _matchesEmail(l['email'])),
             )
             .map(
               (l) => {
@@ -303,7 +383,7 @@ class OfflineRepository implements VentureRepository {
         _rows('favorites')
             .where(
               (f) =>
-                  f['userId'] == user.id &&
+                  _userIdAliases.contains(f['userId']) &&
                   visiblePlots.any((p) => p['id'] == f['plotId']),
             )
             .map(
@@ -315,16 +395,18 @@ class OfflineRepository implements VentureRepository {
             .toList(),
       Resource.employees || Resource.employeeAccess => _rows(
         'users',
-      ).where((u) => u['role'] == 'EMPLOYEE').toList(),
+      ).where((u) => u['role'] == 'EMPLOYEE').map(_decorateUser).toList(),
       Resource.admins => _rows(
         'users',
-      ).where((u) => u['role'] == 'ADMIN').toList(),
+      ).where((u) => u['role'] == 'ADMIN').map(_decorateUser).toList(),
       Resource.customerAccounts => _rows(
         'users',
-      ).where((u) => u['role'] == 'CUSTOMER').toList(),
-      Resource.agents => _rows(
-        'users',
-      ).where((u) => {'AGENT', 'EMPLOYEE'}.contains(u['role'])).toList(),
+      ).where((u) => u['role'] == 'CUSTOMER').map(_decorateUser).toList(),
+      Resource.agents =>
+        _rows('users')
+            .where((u) => {'AGENT', 'EMPLOYEE'}.contains(u['role']))
+            .map(_decorateUser)
+            .toList(),
     };
     for (final key in ['ventureId', 'locationId', 'status', 'plotId']) {
       if (query[key] != null) {
@@ -467,9 +549,9 @@ class OfflineRepository implements VentureRepository {
           }
           row['status'] = 'NEW';
           if (user.role == Role.employee) {
-            row['agentId'] = user.id;
+            row['agentId'] = _scopeUser.id;
           } else {
-            row['agentId'] ??= user.id;
+            row['agentId'] ??= _scopeUser.id;
           }
           _rows('leads', data).add(row);
           _rows('customers', data).add({
@@ -498,8 +580,8 @@ class OfflineRepository implements VentureRepository {
           row['status'] ??= 'FOLLOWING_UP';
           row['interested'] ??= row['status'] != 'FOLLOWING_UP';
           if (user.role == Role.employee) {
-            row['recordOwner'] = user.email;
-            row['leadName'] = user.email;
+            row['recordOwner'] = _scopeUser.email;
+            row['leadName'] = _scopeUser.email;
           }
           // Customer access is established by a lead, never by editable notes.
           row['customerEmail'] = null;
@@ -507,13 +589,13 @@ class OfflineRepository implements VentureRepository {
         case Resource.favorites:
           final plotId = requiredText(value, 'plotId');
           Permissions.require(_plots(data).any((p) => p['id'] == plotId));
-          if (_rows(
-            'favorites',
-            data,
-          ).any((f) => f['userId'] == user.id && f['plotId'] == plotId)) {
+          if (_rows('favorites', data).any(
+            (f) =>
+                _userIdAliases.contains(f['userId']) && f['plotId'] == plotId,
+          )) {
             throw const AppFailure('This plot is already saved.');
           }
-          row['userId'] = user.id;
+          row['userId'] = _scopeUser.id;
           _rows('favorites', data).add(row);
         case Resource.tracking:
           _validateTracking(value);
@@ -529,7 +611,7 @@ class OfflineRepository implements VentureRepository {
           ).removeWhere((t) => t['customerId'] == value['customerId']);
           row['status'] = (value['status'] as String? ?? 'ACTIVE')
               .toUpperCase();
-          row['updatedBy'] = user.id;
+          row['updatedBy'] = _scopeUser.id;
           _rows('tracking', data).add(row);
         case Resource.employeeAccess:
           _email(value, 'email');
@@ -635,8 +717,8 @@ class OfflineRepository implements VentureRepository {
         Permissions.require(_customers(data).any((c) => c['id'] == id));
         _validateCustomer(value);
         if (user.role == Role.employee) {
-          value['recordOwner'] = user.email;
-          value['leadName'] = user.email;
+          value['recordOwner'] = _scopeUser.email;
+          value['leadName'] = _scopeUser.email;
         }
         value.remove('customerEmail');
       }
@@ -658,10 +740,9 @@ class OfflineRepository implements VentureRepository {
     Permissions.require(Permissions.canDelete(user.role, resource));
     await _write((data) {
       if (resource == Resource.favorites) {
-        _rows(
-          'favorites',
-          data,
-        ).removeWhere((f) => f['userId'] == user.id && f['plotId'] == id);
+        _rows('favorites', data).removeWhere(
+          (f) => _userIdAliases.contains(f['userId']) && f['plotId'] == id,
+        );
       } else {
         final row = _find(resource.name, id, data);
         if (resource == Resource.leads) {

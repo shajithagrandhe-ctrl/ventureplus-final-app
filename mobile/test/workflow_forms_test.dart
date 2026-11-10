@@ -433,9 +433,11 @@ void main() {
         jsonDecode((await app.preferences.read(OfflineRepository.storageKey))!),
       );
       final inquiries = jsonList(data['inquiries']);
-      expect(inquiries, hasLength(1));
-      expect(inquiries.single['message'], message);
-      expect(inquiries.single['customerEmail'], app.user!.email);
+      final savedInquiry = inquiries.singleWhere(
+        (inquiry) => inquiry['message'] == message,
+      );
+      expect(savedInquiry['customerEmail'], app.user!.email);
+      expect(inquiries.length, greaterThanOrEqualTo(4));
       expect((app.transport as FakeTransport).calls, isEmpty);
       expect(tester.takeException(), isNull);
     },

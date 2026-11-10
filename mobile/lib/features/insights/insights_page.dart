@@ -20,7 +20,7 @@ class _InsightsPageState extends State<InsightsPage> {
   bool loading = true;
   String? error;
   Map<Resource, List<JsonMap>> data = {};
-  List<JsonMap> bookings = [], payments = [], activities = [];
+  List<JsonMap> bookings = [], payments = [], activities = [], inquiries = [];
 
   @override
   void initState() {
@@ -57,6 +57,9 @@ class _InsightsPageState extends State<InsightsPage> {
       final demoActivities = repository is OfflineRepository
           ? repository.demoRows('activities')
           : const <JsonMap>[];
+      final demoInquiries = repository is OfflineRepository
+          ? repository.demoRows('inquiries')
+          : const <JsonMap>[];
       if (!mounted) return;
       setState(() {
         data = {
@@ -65,6 +68,7 @@ class _InsightsPageState extends State<InsightsPage> {
         bookings = demoBookings;
         payments = demoPayments;
         activities = demoActivities;
+        inquiries = demoInquiries;
       });
     } catch (e) {
       if (mounted) setState(() => error = e.toString());
@@ -258,6 +262,19 @@ class _InsightsPageState extends State<InsightsPage> {
                         ),
                         trailing: Text(money((row['amount'] as num?) ?? 0)),
                       ),
+                    const Divider(),
+                    Text(
+                      'Enquiry pipeline',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    for (final row in inquiries.take(4))
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.question_answer_outlined),
+                        title: Text('${row['customerName'] ?? 'Enquiry'}'),
+                        subtitle: Text('${row['message'] ?? ''}'),
+                        trailing: StatusBadge('${row['status'] ?? 'NEW'}'),
+                      ),
                   ],
                 ]),
               if (widget.mode == InsightMode.totalData)
@@ -272,6 +289,8 @@ class _InsightsPageState extends State<InsightsPage> {
                       ('Bookings', bookings.length),
                     if (widget.controller.isOffline)
                       ('Payments', payments.length),
+                    if (widget.controller.isOffline)
+                      ('Enquiries', inquiries.length),
                   ])
                     ListTile(
                       contentPadding: EdgeInsets.zero,

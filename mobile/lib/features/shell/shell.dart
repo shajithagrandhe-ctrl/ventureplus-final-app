@@ -107,7 +107,11 @@ class _AppShellState extends State<AppShell> {
                 style: const TextStyle(color: Brand.ink),
               ),
               subtitle: Text(
-                '${app.user!.email}\n${app.user!.role.label} · ${app.isOffline ? 'Fictional local profile' : 'Verified server identity'}',
+                '${app.user!.email}\n${app.user!.role.label} · ${app.isAuthenticatedDemo
+                    ? 'Verified identity · local demo records'
+                    : app.isOffline
+                    ? 'Fictional local profile'
+                    : 'Verified server identity'}',
                 style: const TextStyle(color: Brand.secondary),
               ),
             ),
@@ -315,7 +319,11 @@ class _AppShellState extends State<AppShell> {
                         ),
                         const SizedBox(width: 7),
                         Text(
-                          app.isOffline ? 'Offline Demo' : 'Connected',
+                          app.isAuthenticatedDemo
+                              ? 'Authenticated Demo'
+                              : app.isOffline
+                              ? 'Offline Demo'
+                              : 'Connected',
                           style: TextStyle(
                             color: app.isOffline
                                 ? Brand.warning
@@ -503,7 +511,8 @@ class _AppShellState extends State<AppShell> {
               child: Column(
                 children: [
                   mobileHeader(),
-                  if (app.isOffline) const _ModeBanner(),
+                  if (app.isOffline)
+                    _ModeBanner(authenticated: app.isAuthenticatedDemo),
                   Expanded(child: pageBody()),
                 ],
               ),
@@ -516,7 +525,8 @@ class _AppShellState extends State<AppShell> {
 }
 
 class _ModeBanner extends StatelessWidget {
-  const _ModeBanner();
+  const _ModeBanner({required this.authenticated});
+  final bool authenticated;
   @override
   Widget build(BuildContext context) => Container(
     width: double.infinity,
@@ -525,9 +535,11 @@ class _ModeBanner extends StatelessWidget {
       horizontal: Brand.gap,
       vertical: Brand.compact,
     ),
-    child: const Text(
-      'Offline Demo · Fictional data · Changes stay on this device',
-      style: TextStyle(color: Brand.warning, fontSize: 12),
+    child: Text(
+      authenticated
+          ? 'Authenticated Demo · Fictional data · Changes stay on this device'
+          : 'Offline Demo · Fictional data · Changes stay on this device',
+      style: const TextStyle(color: Brand.warning, fontSize: 12),
     ),
   );
 }

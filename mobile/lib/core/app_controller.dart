@@ -20,7 +20,11 @@ export '../data/offline_repository.dart';
 export '../data/storage.dart';
 
 class AppController extends ChangeNotifier {
-  AppController({required this.transport, required this.preferences}) {
+  AppController({
+    required this.transport,
+    required this.preferences,
+    bool? authenticatedDemo,
+  }) : useAuthenticatedDemo = authenticatedDemo ?? authenticatedDemoEnabled {
     final api = transport;
     if (api is DioApiTransport) {
       api.onSessionWarning = (message) {
@@ -31,8 +35,13 @@ class AppController extends ChangeNotifier {
   }
   final ApiTransport transport;
   final KeyValueStore preferences;
+  final bool useAuthenticatedDemo;
   static const modeKey = 'ventureplus.mode';
   static const roleKey = 'ventureplus.demoRole';
+  static const authenticatedDemoEnabled = bool.fromEnvironment(
+    'ENABLE_AUTHENTICATED_DEMO',
+    defaultValue: false,
+  );
 
   static Future<AppController> create() async {
     const base = String.fromEnvironment(
@@ -59,7 +68,9 @@ class AppController extends ChangeNotifier {
   String? sessionWarning;
   String? sessionNotice;
   bool _disposed = false;
-  bool get isOffline => mode == SessionMode.offlineDemo;
+  bool get isOffline =>
+      mode == SessionMode.offlineDemo || mode == SessionMode.authenticatedDemo;
+  bool get isAuthenticatedDemo => mode == SessionMode.authenticatedDemo;
 
   void _notify() {
     if (!_disposed) notifyListeners();
@@ -100,7 +111,10 @@ class AppController extends ChangeNotifier {
   }
 
   void _expired() {
-    if (mode != SessionMode.connected) return;
+    if (mode != SessionMode.connected &&
+        mode != SessionMode.authenticatedDemo) {
+      return;
+    }
     _clearingSession = true;
     _clearIdentity();
     error = 'Your session expired. Please sign in again.';
@@ -132,7 +146,10 @@ class AppController extends ChangeNotifier {
       user = offline.user;
       mode = SessionMode.offlineDemo;
       repository = offline;
-    } else if (savedMode == SessionMode.connected.name) {
+    } else if (savedMode == SessionMode.connected.name ||
+        (savedMode == SessionMode.authenticatedDemo.name &&
+            useAuthenticatedDemo)) {
+      final authenticatedDemo = savedMode == SessionMode.authenticatedDemo.name;
       await transport.restore();
       try {
         final response = await transport.request('GET', '/auth/me');
@@ -140,12 +157,16 @@ class AppController extends ChangeNotifier {
           jsonObject(jsonObject(response['data'])['user']),
         );
         user = identity;
-        mode = SessionMode.connected;
-        repository = ConnectedRepository(
-          transport,
-          identity,
-          onUnauthorized: _expired,
-        );
+        mode = authenticatedDemo
+            ? SessionMode.authenticatedDemo
+            : SessionMode.connected;
+        repository = authenticatedDemo
+            ? await OfflineRepository.openForIdentity(preferences, identity)
+            : ConnectedRepository(
+                transport,
+                identity,
+                onUnauthorized: _expired,
+              );
       } on AppFailure catch (failure) {
         if (failure.statusCode == 401 || failure.statusCode == 403) {
           await _clearSavedSession();
@@ -164,8 +185,10 @@ class AppController extends ChangeNotifier {
             'Enter a valid email and a password with at least 6 characters.',
           );
         }
-        await preferences.remove(modeKey);
-        await transport.clear();
+        // These local cleanup operations are independent. Run them together so
+        // secure-storage latency does not add another full round trip before
+        // the authentication request starts.
+        await Future.wait([preferences.remove(modeKey), transport.clear()]);
         try {
           await transport.request(
             'POST',
@@ -180,14 +203,19 @@ class AppController extends ChangeNotifier {
           final identity = UserIdentity.fromJson(
             jsonObject(jsonObject(response['data'])['user']),
           );
-          await preferences.write(modeKey, SessionMode.connected.name);
+          final nextMode = useAuthenticatedDemo
+              ? SessionMode.authenticatedDemo
+              : SessionMode.connected;
+          await preferences.write(modeKey, nextMode.name);
           user = identity;
-          mode = SessionMode.connected;
-          repository = ConnectedRepository(
-            transport,
-            identity,
-            onUnauthorized: _expired,
-          );
+          mode = nextMode;
+          repository = useAuthenticatedDemo
+              ? await OfflineRepository.openForIdentity(preferences, identity)
+              : ConnectedRepository(
+                  transport,
+                  identity,
+                  onUnauthorized: _expired,
+                );
         } on Object {
           await transport.clear();
           rethrow;
@@ -204,7 +232,8 @@ class AppController extends ChangeNotifier {
   });
 
   Future<bool> logout() => _action(() async {
-    final wasConnected = mode == SessionMode.connected;
+    final wasConnected =
+        mode == SessionMode.connected || mode == SessionMode.authenticatedDemo;
     _clearIdentity();
     Object? remoteError;
     if (wasConnected) {

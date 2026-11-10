@@ -16,7 +16,7 @@ enum Role {
   );
 }
 
-enum SessionMode { connected, offlineDemo }
+enum SessionMode { connected, authenticatedDemo, offlineDemo }
 
 enum Resource {
   locations('/locations'),

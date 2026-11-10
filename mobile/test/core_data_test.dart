@@ -207,6 +207,49 @@ void main() {
     );
 
     test(
+      'authenticated demo mode keeps server identity and uses local role data',
+      () async {
+        final transport = FakeTransport(
+          handler: (method, path, data, query) async {
+            if (path == '/auth/me') {
+              return {
+                'success': true,
+                'data': {'user': identity(Role.employee)},
+              };
+            }
+            return {'success': true, 'data': <Object>[]};
+          },
+        );
+        final store = MemoryStore();
+        final controller = AppController(
+          transport: transport,
+          preferences: store,
+          authenticatedDemo: true,
+        );
+
+        expect(
+          await controller.login(
+            'test@example.test',
+            'password',
+            Role.employee,
+          ),
+          true,
+        );
+        expect(controller.mode, SessionMode.authenticatedDemo);
+        expect(controller.user, isNotNull);
+        expect(controller.user!.email, 'test@example.test');
+        expect(controller.repository, isA<OfflineRepository>());
+        expect((await controller.repository!.list(Resource.plots)).length, 8);
+        expect(
+          await store.read(AppController.modeKey),
+          SessionMode.authenticatedDemo.name,
+        );
+        expect(transport.calls, ['POST /auth/login', 'GET /auth/me']);
+        controller.dispose();
+      },
+    );
+
+    test(
       'server rejects a role mismatch without publishing a session',
       () async {
         final transport = FakeTransport(
@@ -516,12 +559,16 @@ void main() {
       'demo transactions and activities are linked and role scoped',
       () async {
         final admin = await OfflineRepository.open(MemoryStore(), Role.admin);
+        expect((await admin.list(Resource.plots)), hasLength(30));
+        expect((await admin.list(Resource.leads)), hasLength(40));
         final bookings = admin.demoRows('bookings');
         final payments = admin.demoRows('payments');
         final activities = admin.demoRows('activities');
-        expect(bookings, hasLength(2));
-        expect(payments, hasLength(2));
-        expect(activities, hasLength(3));
+        final inquiries = admin.demoRows('inquiries');
+        expect(bookings, hasLength(15));
+        expect(payments, hasLength(30));
+        expect(activities, hasLength(40));
+        expect(inquiries, hasLength(40));
         expect(
           bookings.every(
             (booking) => payments.any(
@@ -544,6 +591,41 @@ void main() {
         expect(
           customer.demoRows('bookings').single['customerName'],
           'Riya Shah',
+        );
+      },
+    );
+
+    test(
+      'every panel has seeded account, favorite and enquiry coverage',
+      () async {
+        final admin = await OfflineRepository.open(MemoryStore(), Role.admin);
+        expect(await admin.list(Resource.admins), hasLength(1));
+        expect(await admin.list(Resource.locations), hasLength(8));
+        expect(await admin.list(Resource.ventures), hasLength(8));
+        expect(await admin.list(Resource.employees), hasLength(15));
+        final accounts = await admin.list(Resource.customerAccounts);
+        expect(accounts, hasLength(30));
+        expect(accounts.every((row) => row['customerId'] != null), isTrue);
+        final agents = await admin.list(Resource.agents);
+        expect(agents, hasLength(16));
+        expect(agents.any((row) => row['agentId'] != null), isTrue);
+
+        final employee = await OfflineRepository.open(
+          MemoryStore(),
+          Role.employee,
+        );
+        expect(await employee.list(Resource.favorites), hasLength(1));
+        expect(employee.demoRows('inquiries'), hasLength(1));
+
+        final customer = await OfflineRepository.open(
+          MemoryStore(),
+          Role.customer,
+        );
+        expect(await customer.list(Resource.favorites), hasLength(1));
+        expect(customer.demoRows('inquiries'), hasLength(1));
+        expect(
+          customer.demoRows('inquiries').single['customerEmail'],
+          customer.user.email,
         );
       },
     );
