@@ -206,16 +206,23 @@ class AppController extends ChangeNotifier {
           final nextMode = useAuthenticatedDemo
               ? SessionMode.authenticatedDemo
               : SessionMode.connected;
+          // Start local demo hydration before waiting on the session marker.
+          // These operations are independent, so the dashboard can become
+          // available without serializing two local-storage round trips.
+          final repositoryFuture = useAuthenticatedDemo
+              ? OfflineRepository.openForIdentity(preferences, identity)
+              : Future<VentureRepository>.value(
+                  ConnectedRepository(
+                    transport,
+                    identity,
+                    onUnauthorized: _expired,
+                  ),
+                );
           await preferences.write(modeKey, nextMode.name);
+          final selectedRepository = await repositoryFuture;
           user = identity;
           mode = nextMode;
-          repository = useAuthenticatedDemo
-              ? await OfflineRepository.openForIdentity(preferences, identity)
-              : ConnectedRepository(
-                  transport,
-                  identity,
-                  onUnauthorized: _expired,
-                );
+          repository = selectedRepository;
         } on Object {
           await transport.clear();
           rethrow;

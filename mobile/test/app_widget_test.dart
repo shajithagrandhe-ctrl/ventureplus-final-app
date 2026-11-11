@@ -114,6 +114,19 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('dashboard metrics open their corresponding resource context', (
+    tester,
+  ) async {
+    await start(tester, role: Role.admin);
+    final available = find.text('Available', skipOffstage: false);
+    await tester.ensureVisible(available);
+    await tester.tap(available);
+    await tester.pumpAndSettle();
+    expect(find.text('Available plots'), findsOneWidget);
+    expect(find.text('Search this list'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('successful login uses the identity returned by me', (
     tester,
   ) async {
@@ -151,8 +164,8 @@ void main() {
       final app = await start(tester, role: role);
       expect(find.textContaining('Offline Demo'), findsWidgets);
       final bar = tester.widget<NavigationBar>(find.byType(NavigationBar));
-      expect(bar.destinations.length, 4);
-      for (var i = 0; i < 4; i++) {
+      expect(bar.destinations.length, greaterThanOrEqualTo(4));
+      for (var i = 0; i < bar.destinations.length; i++) {
         await tester.tap(find.byType(NavigationDestination).at(i));
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);

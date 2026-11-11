@@ -417,7 +417,7 @@ class ModeStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Semantics(
     label: offline
-        ? 'Offline Demo. Changes remain on this device.'
+        ? 'Demo mode. Changes remain on this device.'
         : 'Connected to the server.',
     child: Container(
       width: double.infinity,
@@ -436,7 +436,7 @@ class ModeStrip extends StatelessWidget {
           const SizedBox(width: Brand.compact),
           Expanded(
             child: Text(
-              offline ? 'Offline Demo · saved on this device' : 'Connected',
+              offline ? 'Demo mode · saved on this device' : 'Connected',
               style: TextStyle(color: offline ? Brand.warning : Brand.sage900),
             ),
           ),

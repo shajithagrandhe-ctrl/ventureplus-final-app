@@ -4,6 +4,7 @@ import '../../core/app_controller.dart';
 import '../../ui/components.dart';
 import '../../ui/theme.dart';
 import '../insights/insights_page.dart';
+import '../workflows/workflow_page.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({
@@ -118,7 +119,32 @@ class _DashboardPageState extends State<DashboardPage> {
   String money(num value) =>
       '₹${value.toStringAsFixed(0).replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+$)'), (m) => '${m[1]},')}';
 
-  Widget metrics(List<(String, String)> items) => LayoutBuilder(
+  Future<void> openResource(
+    Resource resource,
+    String title, {
+    JsonMap query = const {},
+  }) async {
+    if (query.isEmpty) {
+      widget.onOpen(resource, title);
+      return;
+    }
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => WorkflowPage(
+          controller: widget.controller,
+          resource: resource,
+          title: title,
+          query: query,
+        ),
+      ),
+    );
+  }
+
+  Widget metrics(
+    List<(String, String)> items, {
+    Map<String, VoidCallback> actions = const {},
+  }) => LayoutBuilder(
     builder: (context, bounds) => Wrap(
       spacing: Brand.gap,
       runSpacing: Brand.gap,
@@ -129,21 +155,33 @@ class _DashboardPageState extends State<DashboardPage> {
                   ? (bounds.maxWidth - Brand.gap * 3) / 4
                   : (bounds.maxWidth - Brand.gap) / 2,
               child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(Brand.gap),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        item.$1,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                      const SizedBox(height: Brand.compact),
-                      Text(
-                        item.$2,
-                        style: Theme.of(context).textTheme.headlineMedium,
-                      ),
-                    ],
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: actions[item.$1],
+                  child: Padding(
+                    padding: const EdgeInsets.all(Brand.gap),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                item.$1,
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                              const SizedBox(height: Brand.compact),
+                              Text(
+                                item.$2,
+                                style: Theme.of(context).textTheme.headlineMedium,
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (actions.containsKey(item.$1))
+                          const Icon(Icons.chevron_right, size: 18),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -237,7 +275,27 @@ class _DashboardPageState extends State<DashboardPage> {
                       ('Available', '${countStatus('AVAILABLE')}'),
                       ('Advance', '${countStatus('ADVANCE')}'),
                       ('Sold', '${countStatus('SOLD')}'),
-                    ]),
+                    ], actions: {
+                      (customer ? 'Your plots' : 'Plots'): () => openResource(
+                        Resource.plots,
+                        customer ? 'My plots' : 'Plots',
+                      ),
+                      'Available': () => openResource(
+                        Resource.plots,
+                        'Available plots',
+                        query: {'status': 'AVAILABLE'},
+                      ),
+                      'Advance': () => openResource(
+                        Resource.plots,
+                        'Plots with advance',
+                        query: {'status': 'ADVANCE'},
+                      ),
+                      'Sold': () => openResource(
+                        Resource.plots,
+                        'Sold plots',
+                        query: {'status': 'SOLD'},
+                      ),
+                    }),
                     heading(customer ? 'My properties' : 'Property inventory'),
                     Card(
                       child: Column(
@@ -294,7 +352,58 @@ class _DashboardPageState extends State<DashboardPage> {
                           ),
                         ),
                       ],
-                    ]),
+                    ], actions: {
+                      'Records': () => openResource(
+                        Resource.customers,
+                        customer ? 'My records' : 'Customer records',
+                      ),
+                      'Leads': () => openResource(Resource.leads, 'Leads'),
+                      'Booked': () => openResource(
+                        Resource.customers,
+                        'Booked customer records',
+                        query: {'status': 'BOOKED'},
+                      ),
+                      if (admin)
+                        'Employees': () => openResource(
+                          Resource.employeeAccess,
+                          'Employee access',
+                        )
+                      else
+                        'Following up': () => openResource(
+                          Resource.customers,
+                          'Follow-up records',
+                          query: {'status': 'FOLLOWING_UP'},
+                        ),
+                      if (app.isOffline) ...{
+                        'Bookings': () => Navigator.push<void>(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => InsightsPage(
+                              controller: app,
+                              mode: InsightMode.reports,
+                            ),
+                          ),
+                        ),
+                        'Enquiries': () => Navigator.push<void>(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => InsightsPage(
+                              controller: app,
+                              mode: InsightMode.reports,
+                            ),
+                          ),
+                        ),
+                        'Collected': () => Navigator.push<void>(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => InsightsPage(
+                              controller: app,
+                              mode: InsightMode.totalData,
+                            ),
+                          ),
+                        ),
+                      },
+                    }),
                     if (secondaryLoading)
                       const Padding(
                         padding: EdgeInsets.only(top: Brand.compact),
@@ -332,9 +441,15 @@ class _DashboardPageState extends State<DashboardPage> {
                         trailing: StatusBadge(
                           '${record['status'] ?? 'FOLLOWING_UP'}',
                         ),
-                        onTap: () => widget.onOpen(
-                          Resource.customers,
-                          'Customer records',
+                        onTap: () => Navigator.push<void>(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => RecordDetailPage(
+                              controller: app,
+                              resource: Resource.customers,
+                              record: record,
+                            ),
+                          ),
                         ),
                       ),
                     const SizedBox(height: Brand.gap),
@@ -408,7 +523,27 @@ class _DashboardPageState extends State<DashboardPage> {
                           valueOf(plots.where((p) => p['status'] == 'SOLD')),
                         ),
                       ),
-                    ]),
+                    ], actions: {
+                      'Portfolio value': () => openResource(
+                        Resource.plots,
+                        'All plots',
+                      ),
+                      'Available value': () => openResource(
+                        Resource.plots,
+                        'Available plots',
+                        query: {'status': 'AVAILABLE'},
+                      ),
+                      'Advance value': () => openResource(
+                        Resource.plots,
+                        'Plots with advance',
+                        query: {'status': 'ADVANCE'},
+                      ),
+                      'Sold value': () => openResource(
+                        Resource.plots,
+                        'Sold plots',
+                        query: {'status': 'SOLD'},
+                      ),
+                    }),
                     const SizedBox(height: Brand.gap),
                     const Text(
                       'Inventory values are area in square yards × price per square yard. These are inventory values, not collected payments.',
@@ -458,9 +593,15 @@ class _DashboardPageState extends State<DashboardPage> {
                               '${owned.length} records · ${owned.where((r) => r['status'] == 'BOOKED').length} booked',
                             ),
                             trailing: const Icon(Icons.chevron_right),
-                            onTap: () => widget.onOpen(
-                              Resource.employeeAccess,
-                              'Employee access',
+                            onTap: () => Navigator.push<void>(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => RecordDetailPage(
+                                  controller: app,
+                                  resource: Resource.employeeAccess,
+                                  record: employee,
+                                ),
+                              ),
                             ),
                           );
                         },

@@ -24,7 +24,9 @@ String failureMessage(Object error) => error is AppFailure
     ? error.message
     : 'Could not load this information. Please try again.';
 
-String savedMessage(AppController controller) => controller.isOffline
+String savedMessage(AppController controller) => controller.isAuthenticatedDemo
+    ? 'Saved in Authenticated Demo on this device.'
+    : controller.isOffline
     ? 'Saved locally in Offline Demo.'
     : 'Saved to the server.';
 

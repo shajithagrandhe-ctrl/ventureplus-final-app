@@ -24,6 +24,11 @@ class _AppShellState extends State<AppShell> {
           ('Venture Locations', Icons.map_outlined, Resource.locations),
           ('Customer records', Icons.people_outline, Resource.customers),
           (
+            'Customer accounts',
+            Icons.person_add_alt_1_outlined,
+            Resource.customerAccounts,
+          ),
+          (
             'Employee access',
             Icons.person_search_outlined,
             Resource.employeeAccess,
@@ -33,6 +38,11 @@ class _AppShellState extends State<AppShell> {
           ('Dashboard', Icons.dashboard_outlined, null),
           ('Venture Locations', Icons.map_outlined, Resource.locations),
           ('Customer records', Icons.people_outline, Resource.customers),
+          (
+            'Customer accounts',
+            Icons.person_add_alt_1_outlined,
+            Resource.customerAccounts,
+          ),
           ('Track Customers', Icons.groups_outlined, Resource.leads),
         ],
         Role.customer => [
@@ -95,7 +105,7 @@ class _AppShellState extends State<AppShell> {
       context: context,
       backgroundColor: Brand.sidebar,
       showDragHandle: true,
-      builder: (context) => SafeArea(
+      builder: (sheetContext) => SafeArea(
         child: ListView(
           shrinkWrap: true,
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
@@ -116,15 +126,23 @@ class _AppShellState extends State<AppShell> {
               ),
             ),
             if (Permissions.canRead(app.user!.role, Resource.admins))
-              const ListTile(
-                leading: Icon(
+              ListTile(
+                leading: const Icon(
                   Icons.admin_panel_settings_outlined,
                   color: Brand.secondary,
                 ),
-                title: Text(
+                title: const Text(
                   'Administrators',
                   style: TextStyle(color: Brand.secondary),
                 ),
+                trailing: const Icon(
+                  Icons.chevron_right,
+                  color: Brand.secondary,
+                ),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  open(Resource.admins, 'Administrators');
+                },
               ),
             ListTile(
               leading: const Icon(Icons.key_outlined, color: Brand.secondary),
